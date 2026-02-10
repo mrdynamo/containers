@@ -37,7 +37,7 @@ RUN apk add --no-cache \
     git clone --single-branch --branch "${VERSION}" https://github.com/mpforce1/Twitch-Channel-Points-Miner.git . \
     && \
     pip install --upgrade uv && \
-    uv pip install --system --no-cache -r requirements.txt \
+    uv pip install --system . \
     && chown -R root:root /app && chmod -R 755 /app \
     && apk del --purge .build-deps \
     && rm -rf /root/.cache /root/.cargo /tmp/*
