@@ -1,35 +1,138 @@
+---
 name: Upstream Sync
 
-on:
+"on":
   schedule:
-    - cron: '0 * * * *' # Runs every hour
+    # Run every 6 hours
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  sync:
+  check-upstream:
+    name: Check Upstream Updates
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v2
-        
-      - name: Read Upstream Sources
-        id: read_sources
+      - name: Checkout
+        # v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Generate Token
+        # v2.2.1
+        uses: >-
+          actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf
+        id: app-token
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
+      - name: Check Upstream Updates
+        id: check-updates
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "sources=$(cat .github/upstream-sources.json)" >> $GITHUB_ENV
-      
-      - name: Sync Upstream Sources and Trigger Builds
+          # Read upstream sources configuration
+          UPSTREAMS=$(jq -c '.upstreams[]' .github/upstream-sources.json)
+          UPDATES_FOUND=false
+          UPDATED_APPS=""
+
+          # Process each upstream source
+          while IFS= read -r upstream; do
+            REPO=$(echo "$upstream" | jq -r '.repo')
+            BRANCH=$(echo "$upstream" | jq -r '.branch')
+            APP=$(echo "$upstream" | jq -r '.app')
+
+            echo "Checking $APP from $REPO (branch: $BRANCH)"
+
+            # Fetch the latest commit SHA from upstream
+            UPSTREAM_SHA=$(
+              curl -s \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${REPO}/commits/${BRANCH}" \
+                | jq -r '.sha'
+            )
+
+            if [ -z "$UPSTREAM_SHA" ] || [ "$UPSTREAM_SHA" = "null" ]; then
+              echo "Failed to fetch upstream SHA for $APP"
+              continue
+            fi
+
+            # Read the stored SHA
+            SHA_FILE=".github/upstream-shas/${APP}.txt"
+            if [ ! -f "$SHA_FILE" ]; then
+              echo "SHA file not found for $APP, initializing..."
+              mkdir -p .github/upstream-shas
+              echo "$UPSTREAM_SHA" > "$SHA_FILE"
+              STORED_SHA="$UPSTREAM_SHA"
+            else
+              STORED_SHA=$(cat "$SHA_FILE" | tr -d '[:space:]')
+              if [ -z "$STORED_SHA" ]; then
+                echo "SHA file is empty for $APP, treating as new"
+                STORED_SHA="none"
+              fi
+            fi
+
+            echo "  Upstream SHA: $UPSTREAM_SHA"
+            echo "  Stored SHA: $STORED_SHA"
+
+            # Check if update is needed
+            if [ "$UPSTREAM_SHA" != "$STORED_SHA" ]; then
+              echo "  Update detected for $APP!"
+              echo "$UPSTREAM_SHA" > "$SHA_FILE"
+              UPDATES_FOUND=true
+              if [ -z "$UPDATED_APPS" ]; then
+                UPDATED_APPS="$APP"
+              else
+                UPDATED_APPS="$UPDATED_APPS,$APP"
+              fi
+            else
+              echo "  No updates for $APP"
+            fi
+          done <<< "$UPSTREAMS"
+
+          echo "updates_found=$UPDATES_FOUND" >> $GITHUB_OUTPUT
+          echo "updated_apps=$UPDATED_APPS" >> $GITHUB_OUTPUT
+
+      - name: Commit Updated SHAs
+        if: steps.check-updates.outputs.updates_found == 'true'
         run: |
-          sources=$(echo ${{ env.sources }} | jq -c '.[]')
-          for source in $sources; do
-            repo=$(echo $source | jq -r '.repo')
-            app=$(echo $source | jq -r '.app')
-            branch=$(echo $source | jq -r '.branch')
-            
-            echo "Checking updates for $app in $repo on branch $branch"
-            
-            # Add your logic here to check for updates and trigger builds
-            # For example, you could run a command like:
-            # git fetch $repo $branch && git diff --quiet $branch
-            # If there are updates, trigger the build process for the app
-            # Example command (place your build trigger command here):
-            echo "Triggering build for $app..."
-          done
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "github-actions[bot]@users.noreply.github.com"
+          git add .github/upstream-shas/*.txt
+          git commit -m "chore: update upstream SHAs for changed apps"
+          git push
+
+      - name: Trigger Release Workflows
+        if: steps.check-updates.outputs.updates_found == 'true'
+        # v8.0.0
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const updatedApps =
+              '${{ steps.check-updates.outputs.updated_apps }}';
+            const apps = updatedApps.split(',');
+
+            for (const app of apps) {
+              console.log(`Triggering release workflow for ${app}...`);
+              try {
+                await github.rest.actions.createWorkflowDispatch({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'release.yaml',
+                  ref: 'main',
+                  inputs: {
+                    app: app,
+                    release: 'true'
+                  }
+                });
+                console.log(`✓ Triggered release for ${app}`);
+              } catch (error) {
+                const msg = `✗ Failed to trigger release for ${app}:`;
+                console.error(msg, error.message);
+              }
+            }
