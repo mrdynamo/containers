@@ -68,7 +68,7 @@ jobs:
               echo "$UPSTREAM_SHA" > "$SHA_FILE"
               STORED_SHA="$UPSTREAM_SHA"
             else
-              STORED_SHA=$(cat "$SHA_FILE" | tr -d '[:space:]')
+              STORED_SHA=$(tr -d '[:space:]' < "$SHA_FILE")
               if [ -z "$STORED_SHA" ]; then
                 echo "SHA file is empty for $APP, treating as new"
                 STORED_SHA="none"
