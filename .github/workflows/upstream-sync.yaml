@@ -1,109 +1,35 @@
----
 name: Upstream Sync
 
-"on":
+on:
   schedule:
-    # Run every 6 hours
-    - cron: "0 */6 * * *"
-  workflow_dispatch:
-
-permissions:
-  contents: write
+    - cron: '0 * * * *' # Runs every hour
 
 jobs:
-  check-upstream:
-    name: Check Upstream Updates
+  sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        # v6.0.2
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Generate Token
-        # v2.2.1
-        uses: >-
-          actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf
-        id: app-token
-        with:
-          app-id: ${{ secrets.BOT_APP_ID }}
-          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
-
-      - name: Check twitch-channel-points-miner Upstream
-        id: check-tcpm
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+        
+      - name: Read Upstream Sources
+        id: read_sources
         run: |
-          # Fetch the latest commit SHA from upstream
-          UPSTREAM_REPO="mpforce1/Twitch-Channel-Points-Miner"
-          UPSTREAM_SHA=$(
-            curl -s \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${UPSTREAM_REPO}/commits/main" \
-              | jq -r '.sha'
-          )
-
-          if [ -z "$UPSTREAM_SHA" ] || [ "$UPSTREAM_SHA" = "null" ]; then
-            echo "Failed to fetch upstream SHA"
-            exit 1
-          fi
-
-          # Read the stored SHA
-          SHA_FILE=".github/upstream-shas/twitch-channel-points-miner.txt"
-          if [ ! -f "$SHA_FILE" ]; then
-            echo "SHA file not found, initializing..."
-            echo "$UPSTREAM_SHA" > "$SHA_FILE"
-            STORED_SHA="$UPSTREAM_SHA"
-          else
-            STORED_SHA=$(cat "$SHA_FILE" | tr -d '[:space:]')
-            if [ -z "$STORED_SHA" ]; then
-              echo "SHA file is empty, treating as new"
-              STORED_SHA="none"
-            fi
-          fi
-
-          echo "Upstream SHA: $UPSTREAM_SHA"
-          echo "Stored SHA: $STORED_SHA"
-
-          if [ "$UPSTREAM_SHA" != "$STORED_SHA" ]; then
-            echo "Upstream has been updated!"
-            echo "updated=true" >> $GITHUB_OUTPUT
-            echo "new_sha=$UPSTREAM_SHA" >> $GITHUB_OUTPUT
-          else
-            echo "No updates detected"
-            echo "updated=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Update Stored SHA
-        if: steps.check-tcpm.outputs.updated == 'true'
+          echo "sources=$(cat .github/upstream-sources.json)" >> $GITHUB_ENV
+      
+      - name: Sync Upstream Sources and Trigger Builds
         run: |
-          SHA_FILE=".github/upstream-shas/twitch-channel-points-miner.txt"
-          NEW_SHA="${{ steps.check-tcpm.outputs.new_sha }}"
-          echo "$NEW_SHA" > "$SHA_FILE"
-          git config user.name "github-actions[bot]"
-          git config user.email \
-            "github-actions[bot]@users.noreply.github.com"
-          git add "$SHA_FILE"
-          git commit -m \
-            "chore: update twitch-channel-points-miner upstream SHA"
-          git push
-
-      - name: Trigger Release Workflow
-        if: steps.check-tcpm.outputs.updated == 'true'
-        # v8.0.0
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
-        with:
-          github-token: ${{ steps.app-token.outputs.token }}
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'release.yaml',
-              ref: 'main',
-              inputs: {
-                app: 'twitch-channel-points-miner',
-                release: 'true'
-              }
-            });
-            const msg = 'Triggered release workflow for ';
-            console.log(msg + 'twitch-channel-points-miner');
+          sources=$(echo ${{ env.sources }} | jq -c '.[]')
+          for source in $sources; do
+            repo=$(echo $source | jq -r '.repo')
+            app=$(echo $source | jq -r '.app')
+            branch=$(echo $source | jq -r '.branch')
+            
+            echo "Checking updates for $app in $repo on branch $branch"
+            
+            # Add your logic here to check for updates and trigger builds
+            # For example, you could run a command like:
+            # git fetch $repo $branch && git diff --quiet $branch
+            # If there are updates, trigger the build process for the app
+            # Example command (place your build trigger command here):
+            echo "Triggering build for $app..."
+          done
