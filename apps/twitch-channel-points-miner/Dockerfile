@@ -43,6 +43,7 @@ RUN apk add --no-cache \
     && rm -rf /root/.cache /root/.cargo /tmp/*
 
 COPY . /
+RUN chmod +x /entrypoint.sh || true
 
 USER nobody:nogroup
 WORKDIR /config
