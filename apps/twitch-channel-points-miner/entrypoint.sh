@@ -2,6 +2,6 @@
 
 exec \
     /usr/local/bin/python \
-        /app/run.py \
+        /config/run.py \
         "$@"
 
