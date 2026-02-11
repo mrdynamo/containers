@@ -30,11 +30,15 @@ jobs:
 
       - name: Check twitch-channel-points-miner Upstream
         id: check-tcpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Fetch the latest commit SHA from upstream
           UPSTREAM_REPO="mpforce1/Twitch-Channel-Points-Miner"
           UPSTREAM_SHA=$(
             curl -s \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/${UPSTREAM_REPO}/commits/main" \
               | jq -r '.sha'
           )
@@ -46,7 +50,17 @@ jobs:
 
           # Read the stored SHA
           SHA_FILE=".github/upstream-shas/twitch-channel-points-miner.txt"
-          STORED_SHA=$(cat "$SHA_FILE")
+          if [ ! -f "$SHA_FILE" ]; then
+            echo "SHA file not found, initializing..."
+            echo "$UPSTREAM_SHA" > "$SHA_FILE"
+            STORED_SHA="$UPSTREAM_SHA"
+          else
+            STORED_SHA=$(cat "$SHA_FILE" | tr -d '[:space:]')
+            if [ -z "$STORED_SHA" ]; then
+              echo "SHA file is empty, treating as new"
+              STORED_SHA="none"
+            fi
+          fi
 
           echo "Upstream SHA: $UPSTREAM_SHA"
           echo "Stored SHA: $STORED_SHA"
