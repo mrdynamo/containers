@@ -1,7 +1,7 @@
 target "docker-metadata-action" {}
 
 variable "APP" {
-  default = "twitch-channel-points-miner-v2"
+  default = "twitch-channel-points-miner"
 }
 
 variable "VERSION" {
