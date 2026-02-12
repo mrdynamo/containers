@@ -29,21 +29,19 @@ RUN apk add --no-cache \
     && \
     apk add --no-cache --virtual=.build-deps \
     build-base \
-    git \
     libffi-dev \
     openssl-dev \
     musl-dev \
-    && \
-    git clone --single-branch --branch "${VERSION}" https://github.com/mpforce1/Twitch-Channel-Points-Miner.git . \
-    && \
-    pip install --upgrade uv && \
-    uv pip install --system . \
+    && curl -fsSL -o /tmp/app.zip "https://github.com/mpforce1/Twitch-Channel-Points-Miner/archive/refs/tags/${VERSION}.tar.gz" \
+    | tar xzf - -C /app --strip-components=1 \
+    && pip install uv \
+    && uv pip install \
     && chown -R root:root /app && chmod -R 755 /app \
-    && apk del --purge .build-deps \
-    && rm -rf /root/.cache /root/.cargo /tmp/*
+    && pip uninstall --yes uv && apk del --purge .build-deps \
+    && rm -rf /root/.cache /root/.cargo /tmp/* /app/bin/bin
 
 COPY . /
-RUN chmod +x /entrypoint.sh || true
+RUN chmod 0555 /entrypoint.sh || true
 
 USER nobody:nogroup
 WORKDIR /config

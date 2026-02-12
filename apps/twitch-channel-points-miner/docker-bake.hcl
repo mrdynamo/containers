@@ -5,7 +5,8 @@ variable "APP" {
 }
 
 variable "VERSION" {
-  default = "main"
+  // renovate: datasource=github-releases depName=mpforce1/Twitch-Channel-Points-Miner versioning=loose
+  default = "1.0.0"
 }
 
 variable "SOURCE" {
@@ -29,7 +30,7 @@ target "image" {
 target "image-local" {
   inherits = ["image"]
   output = ["type=docker"]
-  tags = ["${APP}:rolling"]
+  tags = ["${APP}:${VERSION}"]
 }
 
 target "image-all" {
