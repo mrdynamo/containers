@@ -26,6 +26,7 @@ ENV PATH="/root/.local/bin/:$PATH"
 ENV UV_LINK_MODE=copy
 ENV UV_NO_DEV=1
 ENV UV_PYTHON_DOWNLOADS=0
+ENV PATH="/app/.venv/bin:$PATH"
 
 RUN apk add --no-cache \
     bash \
@@ -54,7 +55,7 @@ RUN apk add --no-cache \
     && uv sync --locked \
     && \
     # Clean up build dependencies and caches
-    chown -R root:root /app && chmod -R 755 /app \
+    chown -R nobody:nogroup /app && chmod -R 755 /app \
     && apk del --purge .build-deps \
     && rm -rf /root/.cache /root/.cargo /tmp/*
 
