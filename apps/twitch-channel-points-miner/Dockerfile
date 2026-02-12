@@ -17,6 +17,16 @@ ENV \
 USER root
 WORKDIR /app
 
+# Install uv installer script early so we can use `uv sync` to install the
+# project without building wheels (use copy-link mode to avoid setuptools
+# building wheels for flat-layout projects).
+ADD https://astral.sh/uv/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && rm /uv-installer.sh
+ENV PATH="/root/.local/bin/:$PATH"
+ENV UV_LINK_MODE=copy
+ENV UV_NO_DEV=1
+ENV UV_PYTHON_DOWNLOADS=0
+
 RUN apk add --no-cache \
     bash \
     ca-certificates \
@@ -37,12 +47,11 @@ RUN apk add --no-cache \
     curl -fsSL "https://github.com/mpforce1/Twitch-Channel-Points-Miner/archive/refs/tags/${VERSION}.tar.gz" \
     | tar xzf - -C /app --strip-components=1 \
     && \
-    # Install transient helper `uv` via the interpreter to avoid PATH issues,
-    # use it to install the upstream package with the same semantics as the
-    # project's Dockerfile, then remove it.
-    python3 -m pip install --no-cache-dir uv \
-    && python3 -m uv pip install --system /app \
-    && python3 -m pip uninstall -y uv \
+    # Use uv to sync dependencies and install the project in copy-link mode
+    # (avoids building wheel for flat-layout repo).
+    -- "" \
+    && uv sync --locked --no-install-project || true \
+    && uv sync --locked \
     && \
     # Clean up build dependencies and caches
     chown -R root:root /app && chmod -R 755 /app \
