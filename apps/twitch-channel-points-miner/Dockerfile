@@ -37,11 +37,12 @@ RUN apk add --no-cache \
     curl -fsSL "https://github.com/mpforce1/Twitch-Channel-Points-Miner/archive/refs/tags/${VERSION}.tar.gz" \
     | tar xzf - -C /app --strip-components=1 \
     && \
-    # Install transient helper `uv`, use it to install upstream package with
-    # the same semantics as the project's Dockerfile, then remove it.
-    pip install --no-cache-dir uv \
-    && uv pip install --system /app \
-    && pip uninstall --yes uv \
+    # Install transient helper `uv` via the interpreter to avoid PATH issues,
+    # use it to install the upstream package with the same semantics as the
+    # project's Dockerfile, then remove it.
+    python3 -m pip install --no-cache-dir uv \
+    && python3 -m uv pip install --system /app \
+    && python3 -m pip uninstall -y uv \
     && \
     # Clean up build dependencies and caches
     chown -R root:root /app && chmod -R 755 /app \
