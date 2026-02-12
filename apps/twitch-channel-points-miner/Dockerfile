@@ -26,21 +26,29 @@ RUN apk add --no-cache \
     jq \
     nano \
     tzdata \
-    && \
-    apk add --no-cache --virtual=.build-deps \
+    && apk add --no-cache --virtual=.build-deps \
     build-base \
     libffi-dev \
     openssl-dev \
     musl-dev \
-    && curl -fsSL -o /tmp/app.zip "https://github.com/mpforce1/Twitch-Channel-Points-Miner/archive/refs/tags/${VERSION}.tar.gz" \
+    python3-dev \
+    && \
+    # Download upstream release tarball and extract into /app
+    curl -fsSL "https://github.com/mpforce1/Twitch-Channel-Points-Miner/archive/refs/tags/${VERSION}.tar.gz" \
     | tar xzf - -C /app --strip-components=1 \
-    && pip install uv \
-    && uv pip install \
-    && chown -R root:root /app && chmod -R 755 /app \
-    && pip uninstall --yes uv && apk del --purge .build-deps \
-    && rm -rf /root/.cache /root/.cargo /tmp/* /app/bin/bin
+    && \
+    # Install transient helper `uv`, use it to install upstream package with
+    # the same semantics as the project's Dockerfile, then remove it.
+    pip install --no-cache-dir uv \
+    && uv pip install --system /app \
+    && pip uninstall --yes uv \
+    && \
+    # Clean up build dependencies and caches
+    chown -R root:root /app && chmod -R 755 /app \
+    && apk del --purge .build-deps \
+    && rm -rf /root/.cache /root/.cargo /tmp/*
 
-COPY . /
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod 0555 /entrypoint.sh || true
 
 USER nobody:nogroup
