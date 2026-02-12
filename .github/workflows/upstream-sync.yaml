@@ -34,7 +34,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Read upstream sources configuration
-          UPSTREAMS=$(jq -c '.upstreams[]' .github/upstream-sources.json)
+          UPSTREAMS=$(jq -c '.upstreams[]' .github/upstream/sources.json)
           UPDATES_FOUND=false
           UPDATED_APPS=""
 
@@ -61,10 +61,10 @@ jobs:
             fi
 
             # Read the stored SHA
-            SHA_FILE=".github/upstream-shas/${APP}.txt"
+            SHA_FILE=".github/upstream/${APP}.txt"
             if [ ! -f "$SHA_FILE" ]; then
               echo "SHA file not found for $APP, initializing..."
-              mkdir -p .github/upstream-shas
+              mkdir -p .github/upstream
               echo "$UPSTREAM_SHA" > "$SHA_FILE"
               STORED_SHA="$UPSTREAM_SHA"
             else
@@ -102,7 +102,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email \
             "github-actions[bot]@users.noreply.github.com"
-          git add .github/upstream-shas/*.txt
+          git add .github/upstream/*.txt
           git commit -m "chore: update upstream SHAs for changed apps"
           git push
 
