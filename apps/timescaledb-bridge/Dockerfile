@@ -50,7 +50,6 @@ RUN mkdir -p /out/lib /out/share/extension \
     && if [ -f "/old/lib/timescaledb-tsl-${OLD_VERSION}.so" ]; then cp "/old/lib/timescaledb-tsl-${OLD_VERSION}.so" /out/lib/; fi \
     && test -f "/out/lib/timescaledb-${OLD_VERSION}.so" \
     && test -f "/out/lib/timescaledb.so" \
-    && test -f "/out/lib/timescaledb-2.so" \
     && test -f "/out/share/extension/timescaledb.control"
 
 # ---------------------------------------------------------------------------

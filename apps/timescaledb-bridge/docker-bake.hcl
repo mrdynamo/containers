@@ -56,8 +56,9 @@ target "image-local" {
 
 target "image-all" {
   inherits = ["image"]
+  # Upstream ghcr.io/m00nwtchr/timescaledb:2.27.0 currently publishes amd64 only.
+  # Keep this bridge image amd64-only so CI does not schedule an impossible arm64 build.
   platforms = [
-    "linux/amd64",
-    "linux/arm64"
+    "linux/amd64"
   ]
 }
