@@ -6,7 +6,7 @@ variable "APP" {
 
 variable "VERSION" {
   // renovate: datasource=github-releases depName=timescale/timescaledb-toolkit
-  default = "1.18.0"
+  default = "1.22.0"
 }
 
 variable "SOURCE" {
