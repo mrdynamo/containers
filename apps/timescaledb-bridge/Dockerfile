@@ -65,7 +65,8 @@ FROM docker.io/library/debian:trixie-slim AS extract-old-loader
 ARG OLD_VERSION
 COPY --from=old-release /lib/ /old-lib/
 RUN mkdir -p /old-out \
-    && cp "/old-lib/timescaledb-${OLD_VERSION}.so" /old-out/
+    && cp "/old-lib/timescaledb-${OLD_VERSION}.so" /old-out/ \
+    && cp "/old-lib/timescaledb-tsl-${OLD_VERSION}.so" /old-out/
 
 # ---------------------------------------------------------------------------
 # Final: scratch image — new version files + single old loader .so
