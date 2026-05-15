@@ -23,7 +23,7 @@
 ARG VERSION
 ARG OLD_VERSION
 ARG PG_MAJOR=18
-ARG OLD_IMAGE
+ARG OLD_IMAGE=ghcr.io/m00nwtchr/timescaledb:2.23.1
 
 # ---------------------------------------------------------------------------
 # Stage 1: build the NEW TimescaleDB version (mirrors m00nwtchr pattern)
@@ -40,16 +40,18 @@ RUN apt-get update \
     cmake \
     curl \
     libicu-dev \
+    "postgresql-server-dev-${PG_MAJOR}" \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp
-RUN curl -fsSL "https://github.com/timescale/timescaledb/archive/refs/tags/${VERSION}.tar.gz" \
-    | tar xz \
-    && ./timescaledb-*/bootstrap \
-    && DESTDIR=../built make -C build install \
-    && mkdir -p out/share/extension out/lib \
-    && find built/usr/share -type f -print0 | xargs -0 mv -vt out/share/extension \
-    && find built/usr/lib -type f -print0 | xargs -0 mv -vt out/lib
+RUN mkdir -p /tmp/src /tmp/built /tmp/out/share/extension /tmp/out/lib \
+    && curl -fsSL "https://github.com/timescale/timescaledb/archive/refs/tags/${VERSION}.tar.gz" \
+    | tar xz -C /tmp/src --strip-components=1 \
+    && cd /tmp/src \
+    && ./bootstrap \
+    && make -C build install DESTDIR=/tmp/built \
+    && find /tmp/built/usr/share -type f -print0 | xargs -0 cp -t /tmp/out/share/extension \
+    && find /tmp/built/usr/lib -type f -print0 | xargs -0 cp -t /tmp/out/lib
 
 # ---------------------------------------------------------------------------
 # Stage 2: pull the OLD versioned loader .so from the previous release image.
