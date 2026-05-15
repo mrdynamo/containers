@@ -22,36 +22,13 @@
 
 ARG VERSION
 ARG OLD_VERSION
-ARG PG_MAJOR=18
-ARG OLD_IMAGE=ghcr.io/m00nwtchr/timescaledb:2.23.1
+ARG NEW_IMAGE=ghcr.io/m00nwtchr/timescaledb:2.27.0
+ARG OLD_IMAGE=ghcr.io/shusaan/timescaledb-testing:2.23.1-18-trixie
 
 # ---------------------------------------------------------------------------
-# Stage 1: build the NEW TimescaleDB version (mirrors m00nwtchr pattern)
+# Stage 1: take all NEW extension files from the final upstream image.
 # ---------------------------------------------------------------------------
-FROM docker.io/library/postgres:${PG_MAJOR}-trixie AS build-new
-ARG VERSION
-ARG PG_MAJOR
-
-RUN apt-get update \
-    && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    cmake \
-    curl \
-    libicu-dev \
-    "postgresql-server-dev-${PG_MAJOR}" \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /tmp
-RUN mkdir -p /tmp/src /tmp/built /tmp/out/share/extension /tmp/out/lib \
-    && curl -fsSL "https://github.com/timescale/timescaledb/archive/refs/tags/${VERSION}.tar.gz" \
-    | tar xz -C /tmp/src --strip-components=1 \
-    && cd /tmp/src \
-    && ./bootstrap \
-    && make -C build install DESTDIR=/tmp/built \
-    && find /tmp/built/usr/share -type f -print0 | xargs -0 cp -t /tmp/out/share/extension \
-    && find /tmp/built/usr/lib -type f -print0 | xargs -0 cp -t /tmp/out/lib
+FROM ${NEW_IMAGE} AS new-release
 
 # ---------------------------------------------------------------------------
 # Stage 2: pull the OLD versioned loader .so from the previous release image.
@@ -61,18 +38,25 @@ RUN mkdir -p /tmp/src /tmp/built /tmp/out/share/extension /tmp/out/lib \
 # ---------------------------------------------------------------------------
 FROM ${OLD_IMAGE} AS old-release
 
-FROM docker.io/library/debian:trixie-slim AS extract-old-loader
+FROM docker.io/library/debian:trixie-slim AS assemble
 ARG OLD_VERSION
-COPY --from=old-release /lib/ /old-lib/
-RUN mkdir -p /old-out \
-    && cp "/old-lib/timescaledb-${OLD_VERSION}.so" /old-out/ \
-    && cp "/old-lib/timescaledb-tsl-${OLD_VERSION}.so" /old-out/
+COPY --from=new-release /lib/ /new/lib/
+COPY --from=new-release /share/extension/ /new/share/extension/
+COPY --from=old-release /lib/ /old/lib/
+RUN mkdir -p /out/lib /out/share/extension \
+    && cp -a /new/lib/. /out/lib/ \
+    && cp -a /new/share/extension/. /out/share/extension/ \
+    && cp "/old/lib/timescaledb-${OLD_VERSION}.so" /out/lib/ \
+    && if [ -f "/old/lib/timescaledb-tsl-${OLD_VERSION}.so" ]; then cp "/old/lib/timescaledb-tsl-${OLD_VERSION}.so" /out/lib/; fi \
+    && test -f "/out/lib/timescaledb-${OLD_VERSION}.so" \
+    && test -f "/out/lib/timescaledb.so" \
+    && test -f "/out/lib/timescaledb-2.so" \
+    && test -f "/out/share/extension/timescaledb.control"
 
 # ---------------------------------------------------------------------------
 # Final: scratch image — new version files + single old loader .so
 # ---------------------------------------------------------------------------
 FROM scratch
 # New-version extension files at standard CNPG scratch layout paths.
-COPY --from=build-new /tmp/out /
+COPY --from=assemble /out/ /
 # Old versioned loader required for ALTER EXTENSION to succeed.
-COPY --from=extract-old-loader /old-out/ /lib/

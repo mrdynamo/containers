@@ -17,6 +17,11 @@ variable "OLD_VERSION" {
   default = "2.23.1"
 }
 
+# NEW_IMAGE is pinned to the exact target extension image for cutover.
+variable "NEW_IMAGE" {
+  default = "ghcr.io/m00nwtchr/timescaledb:2.27.0@sha256:fde617cd1b90993118728ef4561e4ebf98d5e6ef6111cb9f80e6ebbf4b5f0ca1"
+}
+
 # OLD_IMAGE is pinned to the exact old extension image currently in use.
 variable "OLD_IMAGE" {
   default = "ghcr.io/shusaan/timescaledb-testing:2.23.1-18-trixie@sha256:4709935bed4cce5977bc4b1858a94e2e80f22f0303217163a9e97b8898e33ee2"
@@ -35,6 +40,7 @@ target "image" {
   args = {
     VERSION     = "${VERSION}"
     OLD_VERSION = "${OLD_VERSION}"
+    NEW_IMAGE   = "${NEW_IMAGE}"
     OLD_IMAGE   = "${OLD_IMAGE}"
   }
   labels = {
