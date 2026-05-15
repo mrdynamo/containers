@@ -33,6 +33,8 @@ FROM ${RUNTIME_IMAGE} AS build-new
 ARG VERSION
 ARG PG_MAJOR
 
+# CNPG image runs as uid 26 (postgres); switch to root for package install + build.
+USER root
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
