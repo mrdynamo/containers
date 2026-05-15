@@ -23,6 +23,11 @@
 ARG VERSION
 ARG OLD_VERSION
 ARG PG_MAJOR=18
+# Pin the server-dev headers to the EXACT same minor version as the CNPG runtime
+# postgres binary.  palloc0_mul was added as an extern symbol in PG 18.4; if
+# the dev package is newer than the runtime, any compiled .so will reference
+# the symbol and fail to load against the older binary.
+ARG PG_DEV_PKG_VERSION=18.3-1.pgdg13+1
 ARG RUNTIME_IMAGE=ghcr.io/cloudnative-pg/postgresql:18.3-standard-trixie@sha256:81bad466fe006454482678c6c67a24c1e30454b519011e0196cba2e4c83e1e1a
 ARG OLD_IMAGE=ghcr.io/shusaan/timescaledb-testing:2.23.1-18-trixie@sha256:4709935bed4cce5977bc4b1858a94e2e80f22f0303217163a9e97b8898e33ee2
 
@@ -32,11 +37,11 @@ ARG OLD_IMAGE=ghcr.io/shusaan/timescaledb-testing:2.23.1-18-trixie@sha256:470993
 FROM ${RUNTIME_IMAGE} AS build-new
 ARG VERSION
 ARG PG_MAJOR
+ARG PG_DEV_PKG_VERSION
 
 # CNPG image runs as uid 26 (postgres); switch to root for package install + build.
 USER root
 RUN apt-get update \
-    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -45,7 +50,7 @@ RUN apt-get update \
     libicu-dev \
     libssl-dev \
     pkg-config \
-    "postgresql-server-dev-${PG_MAJOR}" \
+    "postgresql-server-dev-${PG_MAJOR}=${PG_DEV_PKG_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp

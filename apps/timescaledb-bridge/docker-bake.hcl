@@ -27,6 +27,13 @@ variable "PG_MAJOR" {
   default = "18"
 }
 
+# Pin the server-dev headers to the exact minor version of the CNPG runtime
+# postgres binary.  palloc0_mul became an extern symbol in PG 18.4; mismatching
+# headers vs runtime produces "undefined symbol: palloc0_mul" at load time.
+variable "PG_DEV_PKG_VERSION" {
+  default = "18.3-1.pgdg13+1"
+}
+
 # OLD_IMAGE is pinned to the exact old extension image currently in use.
 variable "OLD_IMAGE" {
   default = "ghcr.io/shusaan/timescaledb-testing:2.23.1-18-trixie@sha256:4709935bed4cce5977bc4b1858a94e2e80f22f0303217163a9e97b8898e33ee2"
@@ -43,11 +50,12 @@ group "default" {
 target "image" {
   inherits = ["docker-metadata-action"]
   args = {
-    VERSION     = "${VERSION}"
-    OLD_VERSION = "${OLD_VERSION}"
-    PG_MAJOR    = "${PG_MAJOR}"
-    RUNTIME_IMAGE = "${RUNTIME_IMAGE}"
-    OLD_IMAGE   = "${OLD_IMAGE}"
+    VERSION            = "${VERSION}"
+    OLD_VERSION        = "${OLD_VERSION}"
+    PG_MAJOR           = "${PG_MAJOR}"
+    PG_DEV_PKG_VERSION = "${PG_DEV_PKG_VERSION}"
+    RUNTIME_IMAGE      = "${RUNTIME_IMAGE}"
+    OLD_IMAGE          = "${OLD_IMAGE}"
   }
   labels = {
     "org.opencontainers.image.source" = "${SOURCE}"
