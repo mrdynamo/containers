@@ -2,18 +2,24 @@
 
 ARG VERSION
 ARG PG_MAJOR=18
+# Pin the builder base AND the dev-headers package to the exact PG minor version
+# used by the CNPG runtime.  palloc0_mul was added as an extern symbol in PG 18.4;
+# compiling against 18.4 pg_config or headers produces a .so that cannot be loaded
+# by a PG 18.3 runtime ("undefined symbol: palloc0_mul").
+ARG PG_IMAGE=docker.io/library/postgres:18.3-trixie@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
+ARG PG_DEV_PKG_VERSION=18.3-1.pgdg13+1
 
-# Use the official postgres image: PGDG apt repo is pre-configured, giving
-# postgresql-server-dev-* at the exact version shipped by the image and
-# guaranteeing ABI compatibility with production CNPG postgres containers.
-FROM docker.io/library/postgres:${PG_MAJOR}-trixie AS builder
+# Use a pinned minor-version postgres image so pg_config and the installed binary
+# match the CNPG runtime exactly.
+FROM ${PG_IMAGE} AS builder
 ARG VERSION
 ARG PG_MAJOR
+ARG PG_DEV_PKG_VERSION
 
-# Upgrade all packages first (security patches), then add build deps.
-# postgresql-server-dev-${PG_MAJOR} resolves from the pre-configured PGDG repo.
+# Pin postgresql-server-dev to the same minor version as the builder base image.
+# Both vectors must match: the pg_config used by pgrx AND the headers it compiles
+# against must agree with the runtime postgres binary.
 RUN apt-get update \
-    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -21,7 +27,7 @@ RUN apt-get update \
     curl \
     libssl-dev \
     pkg-config \
-    "postgresql-server-dev-${PG_MAJOR}" \
+    "postgresql-server-dev-${PG_MAJOR}=${PG_DEV_PKG_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust toolchain (cargo-pgrx requires llvm-tools-preview)
