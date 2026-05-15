@@ -17,9 +17,14 @@ variable "OLD_VERSION" {
   default = "2.23.1"
 }
 
-# NEW_IMAGE is pinned to the exact target extension image for cutover.
-variable "NEW_IMAGE" {
-  default = "ghcr.io/m00nwtchr/timescaledb:2.27.0@sha256:fde617cd1b90993118728ef4561e4ebf98d5e6ef6111cb9f80e6ebbf4b5f0ca1"
+# Build target extension files against the exact CNPG runtime image used by
+# the cluster to avoid backend symbol/export mismatches.
+variable "RUNTIME_IMAGE" {
+  default = "ghcr.io/cloudnative-pg/postgresql:18.3-standard-trixie@sha256:81bad466fe006454482678c6c67a24c1e30454b519011e0196cba2e4c83e1e1a"
+}
+
+variable "PG_MAJOR" {
+  default = "18"
 }
 
 # OLD_IMAGE is pinned to the exact old extension image currently in use.
@@ -40,7 +45,8 @@ target "image" {
   args = {
     VERSION     = "${VERSION}"
     OLD_VERSION = "${OLD_VERSION}"
-    NEW_IMAGE   = "${NEW_IMAGE}"
+    PG_MAJOR    = "${PG_MAJOR}"
+    RUNTIME_IMAGE = "${RUNTIME_IMAGE}"
     OLD_IMAGE   = "${OLD_IMAGE}"
   }
   labels = {
@@ -56,8 +62,8 @@ target "image-local" {
 
 target "image-all" {
   inherits = ["image"]
-  # Upstream ghcr.io/m00nwtchr/timescaledb:2.27.0 currently publishes amd64 only.
-  # Keep this bridge image amd64-only so CI does not schedule an impossible arm64 build.
+  # Bridge is currently constrained to amd64 for this migration path.
+  # Expand to arm64 after verifying runtime + old-image compatibility for that architecture.
   platforms = [
     "linux/amd64"
   ]

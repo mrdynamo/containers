@@ -22,13 +22,41 @@
 
 ARG VERSION
 ARG OLD_VERSION
-ARG NEW_IMAGE=ghcr.io/m00nwtchr/timescaledb:2.27.0
-ARG OLD_IMAGE=ghcr.io/shusaan/timescaledb-testing:2.23.1-18-trixie
+ARG PG_MAJOR=18
+ARG RUNTIME_IMAGE=ghcr.io/cloudnative-pg/postgresql:18.3-standard-trixie@sha256:81bad466fe006454482678c6c67a24c1e30454b519011e0196cba2e4c83e1e1a
+ARG OLD_IMAGE=ghcr.io/shusaan/timescaledb-testing:2.23.1-18-trixie@sha256:4709935bed4cce5977bc4b1858a94e2e80f22f0303217163a9e97b8898e33ee2
 
 # ---------------------------------------------------------------------------
-# Stage 1: take all NEW extension files from the final upstream image.
+# Stage 1: build NEW extension files against the exact CNPG runtime image.
 # ---------------------------------------------------------------------------
-FROM ${NEW_IMAGE} AS new-release
+FROM ${RUNTIME_IMAGE} AS build-new
+ARG VERSION
+ARG PG_MAJOR
+
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    cmake \
+    curl \
+    libicu-dev \
+    libssl-dev \
+    pkg-config \
+    "postgresql-server-dev-${PG_MAJOR}" \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp
+RUN mkdir -p /tmp/src /tmp/built /tmp/out/lib /tmp/out/share/extension \
+    && curl -fsSL "https://github.com/timescale/timescaledb/archive/refs/tags/${VERSION}.tar.gz" \
+    | tar xz -C /tmp/src --strip-components=1 \
+    && cd /tmp/src \
+    && ./bootstrap \
+    && make -C build install DESTDIR=/tmp/built \
+    && find /tmp/built -type f -name "timescaledb*.so" -exec cp {} /tmp/out/lib/ \; \
+    && find /tmp/built -type f -path "*/extension/timescaledb*" -exec cp {} /tmp/out/share/extension/ \; \
+    && test -f /tmp/out/lib/timescaledb.so \
+    && test -f /tmp/out/share/extension/timescaledb.control
 
 # ---------------------------------------------------------------------------
 # Stage 2: pull the OLD versioned loader .so from the previous release image.
@@ -40,14 +68,13 @@ FROM ${OLD_IMAGE} AS old-release
 
 FROM docker.io/library/debian:trixie-slim AS assemble
 ARG OLD_VERSION
-COPY --from=new-release /lib/ /new/lib/
-COPY --from=new-release /share/extension/ /new/share/extension/
+COPY --from=build-new /tmp/out/lib/ /new/lib/
+COPY --from=build-new /tmp/out/share/extension/ /new/share/extension/
 COPY --from=old-release /lib/ /old/lib/
 RUN mkdir -p /out/lib /out/share/extension \
     && cp -a /new/lib/. /out/lib/ \
     && cp -a /new/share/extension/. /out/share/extension/ \
-    && cp "/old/lib/timescaledb-${OLD_VERSION}.so" /out/lib/ \
-    && if [ -f "/old/lib/timescaledb-tsl-${OLD_VERSION}.so" ]; then cp "/old/lib/timescaledb-tsl-${OLD_VERSION}.so" /out/lib/; fi \
+    && find /old/lib -maxdepth 1 -type f -name "*-${OLD_VERSION}.so" -exec cp {} /out/lib/ \; \
     && test -f "/out/lib/timescaledb-${OLD_VERSION}.so" \
     && test -f "/out/lib/timescaledb.so" \
     && test -f "/out/share/extension/timescaledb.control"
