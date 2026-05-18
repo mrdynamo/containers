@@ -14,14 +14,13 @@ variable "PG_MAJOR" {
 }
 
 # Pin the builder base image and dev-headers package to the exact PG minor version
-# used by the CNPG runtime.  palloc0_mul became an extern symbol in PG 18.4; a
-# mismatch produces "undefined symbol: palloc0_mul" at extension load time.
+# used by the CNPG runtime to avoid symbol mismatches at extension load time.
 variable "PG_IMAGE" {
-  default = "docker.io/library/postgres:18.3-trixie@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db"
+  default = "docker.io/library/postgres:18.4-trixie@sha256:f7ce845ee6873dd84be93c9828fe0d1fab0f9707dc9ac569694657398b290bce"
 }
 
 variable "PG_DEV_PKG_VERSION" {
-  default = "18.3-1.pgdg13+1"
+  default = "18.4-1.pgdg13+1"
 }
 
 variable "SOURCE" {

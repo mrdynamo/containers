@@ -3,11 +3,9 @@
 ARG VERSION
 ARG PG_MAJOR=18
 # Pin the builder base AND the dev-headers package to the exact PG minor version
-# used by the CNPG runtime.  palloc0_mul was added as an extern symbol in PG 18.4;
-# compiling against 18.4 pg_config or headers produces a .so that cannot be loaded
-# by a PG 18.3 runtime ("undefined symbol: palloc0_mul").
-ARG PG_IMAGE=docker.io/library/postgres:18.3-trixie@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
-ARG PG_DEV_PKG_VERSION=18.3-1.pgdg13+1
+# used by the CNPG runtime to avoid symbol mismatches at extension load time.
+ARG PG_IMAGE=docker.io/library/postgres:18.4-trixie@sha256:f7ce845ee6873dd84be93c9828fe0d1fab0f9707dc9ac569694657398b290bce
+ARG PG_DEV_PKG_VERSION=18.4-1.pgdg13+1
 
 # Use a pinned minor-version postgres image so pg_config and the installed binary
 # match the CNPG runtime exactly.

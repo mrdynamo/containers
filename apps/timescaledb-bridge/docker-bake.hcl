@@ -20,7 +20,7 @@ variable "OLD_VERSION" {
 # Build target extension files against the exact CNPG runtime image used by
 # the cluster to avoid backend symbol/export mismatches.
 variable "RUNTIME_IMAGE" {
-  default = "ghcr.io/cloudnative-pg/postgresql:18.3-standard-trixie@sha256:81bad466fe006454482678c6c67a24c1e30454b519011e0196cba2e4c83e1e1a"
+  default = "ghcr.io/cloudnative-pg/postgresql:18.4-standard-trixie@sha256:58c9a9e29a23b814f8f335ce178727d83bc40d96ed7fe8977192d2d8cdcb3927"
 }
 
 variable "PG_MAJOR" {
@@ -28,10 +28,9 @@ variable "PG_MAJOR" {
 }
 
 # Pin the server-dev headers to the exact minor version of the CNPG runtime
-# postgres binary.  palloc0_mul became an extern symbol in PG 18.4; mismatching
-# headers vs runtime produces "undefined symbol: palloc0_mul" at load time.
+# postgres binary to avoid symbol mismatches at extension load time.
 variable "PG_DEV_PKG_VERSION" {
-  default = "18.3-1.pgdg13+1"
+  default = "18.4-1.pgdg13+1"
 }
 
 # OLD_IMAGE is pinned to the exact old extension image currently in use.
