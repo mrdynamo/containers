@@ -25,8 +25,8 @@ ARG OLD_VERSION
 ARG PG_MAJOR=18
 # Pin the server-dev headers to the EXACT same minor version as the CNPG runtime
 # postgres binary to avoid symbol mismatches at extension load time.
-ARG PG_DEV_PKG_VERSION=18.4-1.pgdg13+1
-ARG RUNTIME_IMAGE=ghcr.io/cloudnative-pg/postgresql:18.4-standard-trixie@sha256:58c9a9e29a23b814f8f335ce178727d83bc40d96ed7fe8977192d2d8cdcb3927
+ARG PG_DEV_PKG_VERSION=18.6-1.pgdg13+2
+ARG RUNTIME_IMAGE=ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:771f9eab5225587af259d84680cc69a5b6e374ac32bb24effafde1f3368a1241
 ARG OLD_IMAGE=ghcr.io/shusaan/timescaledb-testing:2.23.1-18-trixie@sha256:4709935bed4cce5977bc4b1858a94e2e80f22f0303217163a9e97b8898e33ee2
 
 # ---------------------------------------------------------------------------
