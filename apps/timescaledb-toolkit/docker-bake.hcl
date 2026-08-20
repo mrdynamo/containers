@@ -6,7 +6,7 @@ variable "APP" {
 
 variable "VERSION" {
   // renovate: datasource=github-releases depName=timescale/timescaledb-toolkit
-  default = "1.22.0"
+  default = "1.25.0"
 }
 
 variable "PG_MAJOR" {
@@ -16,11 +16,11 @@ variable "PG_MAJOR" {
 # Pin the builder base image and dev-headers package to the exact PG minor version
 # used by the CNPG runtime to avoid symbol mismatches at extension load time.
 variable "PG_IMAGE" {
-  default = "docker.io/library/postgres:18.4-trixie@sha256:f7ce845ee6873dd84be93c9828fe0d1fab0f9707dc9ac569694657398b290bce"
+  default = "docker.io/library/postgres:18.6-trixie@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941"
 }
 
 variable "PG_DEV_PKG_VERSION" {
-  default = "18.4-1.pgdg13+1"
+  default = "18.6-1.pgdg13+2"
 }
 
 variable "SOURCE" {
