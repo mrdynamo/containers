@@ -35,7 +35,7 @@ variable "PG_DEV_PKG_VERSION" {
 
 # OLD_IMAGE is pinned to the exact old extension image currently in use.
 variable "OLD_IMAGE" {
-  default = "ghcr.io/shusaan/timescaledb-testing:2.23.1-18-trixie@sha256:4709935bed4cce5977bc4b1858a94e2e80f22f0303217163a9e97b8898e33ee2"
+  default = "ghcr.io/mrdynamo/timescaledb-bridge:2.27.0@sha256:918528675538a8b3a73d5c2dd4e4486796f6e1859fcc60946ccd3cca369cf93e"
 }
 
 variable "SOURCE" {
