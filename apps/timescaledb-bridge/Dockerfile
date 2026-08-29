@@ -109,7 +109,9 @@ RUN mkdir -p /tmp/src /tmp/built /tmp/out/lib \
     && sed -i "s/^version[[:space:]]*=.*/version = ${OLD_VERSION}/" version.config \
     && ./bootstrap \
     && make -C build install DESTDIR=/tmp/built \
-    && find /tmp/built -type f -name "timescaledb-${OLD_VERSION}.so" -exec cp {} /tmp/out/lib/ \; \
+    # timescaledb-tsl-<version>.so (community-licensed functions) is a
+    # separate module from timescaledb-<version>.so; grab both.
+    && find /tmp/built -type f -name "timescaledb*${OLD_VERSION}.so" -exec cp {} /tmp/out/lib/ \; \
     && test -f "/tmp/out/lib/timescaledb-${OLD_VERSION}.so"
 
 FROM docker.io/library/debian:trixie-slim AS assemble
@@ -120,7 +122,7 @@ COPY --from=build-old /tmp/out/lib/ /old/lib/
 RUN mkdir -p /out/lib /out/share/extension \
     && cp -a /new/lib/. /out/lib/ \
     && cp -a /new/share/extension/. /out/share/extension/ \
-    && cp "/old/lib/timescaledb-${OLD_VERSION}.so" /out/lib/ \
+    && cp -a /old/lib/. /out/lib/ \
     && test -f "/out/lib/timescaledb-${OLD_VERSION}.so" \
     && test -f "/out/lib/timescaledb.so" \
     && test -f "/out/share/extension/timescaledb.control"
