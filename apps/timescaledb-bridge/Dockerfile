@@ -12,6 +12,11 @@
 #   - The versioned loader .so from OLD_VERSION alone  (so PG can load the
 #     currently-installed extension, then ALTER EXTENSION upgrades it)
 #
+# OLD_VERSION MUST match the exact extversion in pg_extension, not the git tag:
+#   SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';
+# Upstream's version.config for a tag can differ from the tag name itself
+# (e.g. tag 2.27.0 embeds version "2.27.0-dev"), so verify before building.
+#
 # Migration procedure
 # -------------------
 #   1. Set CNPG extensionImageRef to this bridge image; wait for cluster healthy.

@@ -5,16 +5,20 @@ variable "APP" {
 }
 
 # VERSION  = the TimescaleDB release you are upgrading TO.
-# OLD_VERSION = the release currently installed in the database (upgrade FROM).
+# OLD_VERSION = the exact extversion currently installed in the database (upgrade FROM).
 # Neither variable carries a Renovate annotation: this is a one-time migration
 # image and should be removed from the repo once the upgrade is complete.
+# Verify with: SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';
+# NOTE: upstream's version.config for a tag doesn't always match the tag name
+# itself (e.g. tag 2.27.0 embeds version "2.27.0-dev"), so OLD_VERSION must be
+# the catalog extversion, not the git tag.
 
 variable "VERSION" {
   default = "2.29.2"
 }
 
 variable "OLD_VERSION" {
-  default = "2.23.1"
+  default = "2.27.0-dev"
 }
 
 # Build target extension files against the exact CNPG runtime image used by
