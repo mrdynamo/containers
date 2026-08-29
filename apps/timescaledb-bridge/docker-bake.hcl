@@ -9,16 +9,17 @@ variable "APP" {
 # Neither variable carries a Renovate annotation: this is a one-time migration
 # image and should be removed from the repo once the upgrade is complete.
 # Verify with: SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';
-# NOTE: upstream's version.config for a tag doesn't always match the tag name
-# itself (e.g. tag 2.27.0 embeds version "2.27.0-dev"), so OLD_VERSION must be
-# the catalog extversion, not the git tag.
+# The old loader is rebuilt from source (see Dockerfile build-old stage) with
+# version.config patched to this exact string, so OLD_VERSION must match the
+# catalog extversion currently set in the database, not necessarily the raw
+# upstream git tag.
 
 variable "VERSION" {
   default = "2.29.2"
 }
 
 variable "OLD_VERSION" {
-  default = "2.27.0-dev"
+  default = "2.27.0"
 }
 
 # Build target extension files against the exact CNPG runtime image used by
@@ -37,11 +38,6 @@ variable "PG_DEV_PKG_VERSION" {
   default = "18.6-1.pgdg13+2"
 }
 
-# OLD_IMAGE is pinned to the exact old extension image currently in use.
-variable "OLD_IMAGE" {
-  default = "ghcr.io/mrdynamo/timescaledb-bridge:2.27.0@sha256:918528675538a8b3a73d5c2dd4e4486796f6e1859fcc60946ccd3cca369cf93e"
-}
-
 variable "SOURCE" {
   default = "https://github.com/timescale/timescaledb"
 }
@@ -58,7 +54,6 @@ target "image" {
     PG_MAJOR           = "${PG_MAJOR}"
     PG_DEV_PKG_VERSION = "${PG_DEV_PKG_VERSION}"
     RUNTIME_IMAGE      = "${RUNTIME_IMAGE}"
-    OLD_IMAGE          = "${OLD_IMAGE}"
   }
   labels = {
     "org.opencontainers.image.source" = "${SOURCE}"

@@ -12,10 +12,16 @@
 #   - The versioned loader .so from OLD_VERSION alone  (so PG can load the
 #     currently-installed extension, then ALTER EXTENSION upgrades it)
 #
-# OLD_VERSION MUST match the exact extversion in pg_extension, not the git tag:
+# OLD_VERSION MUST match the exact extversion in pg_extension, not necessarily
+# the raw git tag string:
 #   SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';
-# Upstream's version.config for a tag can differ from the tag name itself
-# (e.g. tag 2.27.0 embeds version "2.27.0-dev"), so verify before building.
+# The old loader is rebuilt from source here (not copied from a prior image)
+# so its compiled-in version string always matches OLD_VERSION exactly. This
+# matters because TimescaleDB FATALs on connect if "shared library version"
+# (baked into the .so at compile time) differs from "SQL version" (extversion
+# in pg_extension) — a mismatch here breaks EVERY connection to the database,
+# not just calls to timescaledb functions, since the check runs on backend
+# startup via shared_preload_libraries.
 #
 # Migration procedure
 # -------------------
@@ -32,7 +38,6 @@ ARG PG_MAJOR=18
 # postgres binary to avoid symbol mismatches at extension load time.
 ARG PG_DEV_PKG_VERSION=18.6-1.pgdg13+2
 ARG RUNTIME_IMAGE=ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:771f9eab5225587af259d84680cc69a5b6e374ac32bb24effafde1f3368a1241
-ARG OLD_IMAGE=ghcr.io/shusaan/timescaledb-testing:2.23.1-18-trixie@sha256:4709935bed4cce5977bc4b1858a94e2e80f22f0303217163a9e97b8898e33ee2
 
 # ---------------------------------------------------------------------------
 # Stage 1: build NEW extension files against the exact CNPG runtime image.
@@ -73,30 +78,50 @@ RUN mkdir -p /tmp/src /tmp/built /tmp/out/lib /tmp/out/share/extension \
     && test -f /tmp/out/share/extension/timescaledb.control
 
 # ---------------------------------------------------------------------------
-# Stage 2: pull the OLD versioned loader .so from the previous release image.
-#          Only the file named timescaledb-<OLD_VERSION>.so is needed; the
-#          other old files (timescaledb-2.so, etc.) must NOT overwrite the new
-#          ones, so we extract with a helper stage.
+# Stage 2: build the OLD versioned loader .so from source, same as build-new.
+#          Only its timescaledb-<OLD_VERSION>.so is used; rebuilding (rather
+#          than reusing pre-built bytes from a prior image) guarantees the
+#          compiled-in version string matches OLD_VERSION exactly.
 # ---------------------------------------------------------------------------
-FROM ${OLD_IMAGE} AS old-release
+FROM ${RUNTIME_IMAGE} AS build-old
+ARG OLD_VERSION
+ARG PG_MAJOR
+ARG PG_DEV_PKG_VERSION
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    cmake \
+    curl \
+    libicu-dev \
+    libssl-dev \
+    pkg-config \
+    "postgresql-server-dev-${PG_MAJOR}=${PG_DEV_PKG_VERSION}" \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp
+RUN mkdir -p /tmp/src /tmp/built /tmp/out/lib \
+    && curl -fsSL "https://github.com/timescale/timescaledb/archive/refs/tags/${OLD_VERSION}.tar.gz" \
+    | tar xz -C /tmp/src --strip-components=1 \
+    && cd /tmp/src \
+    && sed -i "s/^version[[:space:]]*=.*/version = ${OLD_VERSION}/" version.config \
+    && ./bootstrap \
+    && make -C build install DESTDIR=/tmp/built \
+    && find /tmp/built -type f -name "timescaledb-${OLD_VERSION}.so" -exec cp {} /tmp/out/lib/ \; \
+    && test -f "/tmp/out/lib/timescaledb-${OLD_VERSION}.so"
 
 FROM docker.io/library/debian:trixie-slim AS assemble
 ARG OLD_VERSION
 COPY --from=build-new /tmp/out/lib/ /new/lib/
 COPY --from=build-new /tmp/out/share/extension/ /new/share/extension/
-COPY --from=old-release /lib/ /old/lib/
+COPY --from=build-old /tmp/out/lib/ /old/lib/
 RUN mkdir -p /out/lib /out/share/extension \
     && cp -a /new/lib/. /out/lib/ \
     && cp -a /new/share/extension/. /out/share/extension/ \
-    && find /old/lib -maxdepth 1 -type f -name "*-${OLD_VERSION}.so" -exec cp {} /out/lib/ \; \
+    && cp "/old/lib/timescaledb-${OLD_VERSION}.so" /out/lib/ \
     && test -f "/out/lib/timescaledb-${OLD_VERSION}.so" \
-    # Also ship a clean-named alias of the old loader (strip any "-dev" suffix).
-    # Relabeling pg_extension/catalog metadata to the clean version during a
-    # dev-tag recovery needs a matching .so on disk under that exact name too.
-    && CLEAN_OLD_VERSION="${OLD_VERSION%-dev}" \
-    && if [ "${CLEAN_OLD_VERSION}" != "${OLD_VERSION}" ]; then \
-    cp "/out/lib/timescaledb-${OLD_VERSION}.so" "/out/lib/timescaledb-${CLEAN_OLD_VERSION}.so"; \
-    fi \
     && test -f "/out/lib/timescaledb.so" \
     && test -f "/out/share/extension/timescaledb.control"
 
