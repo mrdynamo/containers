@@ -61,6 +61,10 @@ RUN mkdir -p /tmp/src /tmp/built /tmp/out/lib /tmp/out/share/extension \
     && curl -fsSL "https://github.com/timescale/timescaledb/archive/refs/tags/${VERSION}.tar.gz" \
     | tar xz -C /tmp/src --strip-components=1 \
     && cd /tmp/src \
+    # upstream's version.config can embed a "-dev" suffix even on tagged releases
+    # (e.g. tag 2.27.0 -> "2.27.0-dev"), which breaks ALTER EXTENSION UPDATE
+    # since no upgrade script targets that string; force it to the clean tag.
+    && sed -i "s/^version[[:space:]]*=.*/version = ${VERSION}/" version.config \
     && ./bootstrap \
     && make -C build install DESTDIR=/tmp/built \
     && find /tmp/built -type f -name "timescaledb*.so" -exec cp {} /tmp/out/lib/ \; \
@@ -86,6 +90,13 @@ RUN mkdir -p /out/lib /out/share/extension \
     && cp -a /new/share/extension/. /out/share/extension/ \
     && find /old/lib -maxdepth 1 -type f -name "*-${OLD_VERSION}.so" -exec cp {} /out/lib/ \; \
     && test -f "/out/lib/timescaledb-${OLD_VERSION}.so" \
+    # Also ship a clean-named alias of the old loader (strip any "-dev" suffix).
+    # Relabeling pg_extension/catalog metadata to the clean version during a
+    # dev-tag recovery needs a matching .so on disk under that exact name too.
+    && CLEAN_OLD_VERSION="${OLD_VERSION%-dev}" \
+    && if [ "${CLEAN_OLD_VERSION}" != "${OLD_VERSION}" ]; then \
+    cp "/out/lib/timescaledb-${OLD_VERSION}.so" "/out/lib/timescaledb-${CLEAN_OLD_VERSION}.so"; \
+    fi \
     && test -f "/out/lib/timescaledb.so" \
     && test -f "/out/share/extension/timescaledb.control"
 
