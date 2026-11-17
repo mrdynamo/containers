@@ -71,10 +71,13 @@ COPY --chmod=0755 scripts/build-toolkit.sh /usr/local/bin/build-toolkit
 # ---------------------------------------------------------------------------
 # Stage 1: the new version (VERSION is the upstream tag, e.g. 1.27.0+p2).
 # ---------------------------------------------------------------------------
+# No cargo cache mounts in build-new/build-old: the two stages run in
+# parallel, and a shared registry mount makes them unpack the same crates at
+# once ("File exists (os error 17)"; cargo's lock lives outside the mount).
+# CI does not keep cache mounts anyway.
 FROM build-base AS build-new
 ARG VERSION
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    build-toolkit "${VERSION}" /out full
+RUN build-toolkit "${VERSION}" /out full
 
 # ---------------------------------------------------------------------------
 # Stage 2: only the library of the version production runs.
@@ -82,8 +85,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM build-base AS build-old
 ARG VERSION
 ARG OLD_VERSION
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    mkdir -p /out/lib \
+RUN mkdir -p /out/lib \
     && if [ "${OLD_VERSION}" = "${VERSION%%+*}" ]; then echo "OLD_VERSION == VERSION, nothing to bundle"; exit 0; fi \
     && build-toolkit "${OLD_VERSION}" /out lib
 
