@@ -4,6 +4,9 @@ variable "APP" {
   default = "timescaledb-toolkit"
 }
 
+# Upstream re-tags fixed releases as X.Y.Z+pN (e.g. 1.27.0 shipped with a
+# "-dev" crate version; 1.27.0+p2 is the corrected tag). The image itself is
+# tagged with the plain X.Y.Z.
 variable "VERSION" {
   // renovate: datasource=github-releases depName=timescale/timescaledb-toolkit
   default = "1.25.0"
@@ -13,14 +16,12 @@ variable "PG_MAJOR" {
   default = "18"
 }
 
-# Pin the builder base image and dev-headers package to the exact PG minor version
-# used by the CNPG runtime to avoid symbol mismatches at extension load time.
-variable "PG_IMAGE" {
-  default = "docker.io/library/postgres:18.6-trixie@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941"
-}
-
-variable "PG_DEV_PKG_VERSION" {
-  default = "18.6-1.pgdg13+2"
+# Build against the exact CNPG runtime image used by the cluster, to avoid
+# symbol mismatches at extension load time. The matching postgresql-server-dev
+# version is derived from this image at build time.
+variable "RUNTIME_IMAGE" {
+  // renovate: datasource=docker depName=ghcr.io/cloudnative-pg/postgresql
+  default = "ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:771f9eab5225587af259d84680cc69a5b6e374ac32bb24effafde1f3368a1241"
 }
 
 variable "SOURCE" {
@@ -34,10 +35,9 @@ group "default" {
 target "image" {
   inherits = ["docker-metadata-action"]
   args = {
-    VERSION            = "${VERSION}"
-    PG_MAJOR           = "${PG_MAJOR}"
-    PG_IMAGE           = "${PG_IMAGE}"
-    PG_DEV_PKG_VERSION = "${PG_DEV_PKG_VERSION}"
+    VERSION       = "${VERSION}"
+    PG_MAJOR      = "${PG_MAJOR}"
+    RUNTIME_IMAGE = "${RUNTIME_IMAGE}"
   }
   labels = {
     "org.opencontainers.image.source" = "${SOURCE}"

@@ -57,9 +57,10 @@ runs:
         script: |-
           const semver = require('semver');
 
-          // Strip the v prefix and pre-release info
+          // Strip the v prefix, pre-release info and build metadata
+          // (e.g. 1.27.0+p2 -> 1.27.0; docker tags can't contain '+')
           function sanitize(version) {
-              return version.replace(/^v/, '').split('-')[0];
+              return version.replace(/^v/, '').split(/[-+]/)[0];
           }
 
           function calver() {

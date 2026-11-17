@@ -1,23 +1,30 @@
 # syntax=docker/dockerfile:1
 
-ARG VERSION
-ARG PG_MAJOR=18
-# Pin the builder base AND the dev-headers package to the exact PG minor version
-# used by the CNPG runtime to avoid symbol mismatches at extension load time.
-ARG PG_IMAGE=docker.io/library/postgres:18.6-trixie@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941
-ARG PG_DEV_PKG_VERSION=18.6-1.pgdg13+2
+ARG RUNTIME_IMAGE
 
-# Use a pinned minor-version postgres image so pg_config and the installed binary
-# match the CNPG runtime exactly.
-FROM ${PG_IMAGE} AS builder
+# Build on the exact CNPG runtime image so pg_config, the headers pgrx compiles
+# against, and the postgres binary that loads the extension all agree.
+FROM ${RUNTIME_IMAGE} AS builder
 ARG VERSION
 ARG PG_MAJOR
-ARG PG_DEV_PKG_VERSION
 
-# Pin postgresql-server-dev to the same minor version as the builder base image.
-# Both vectors must match: the pg_config used by pgrx AND the headers it compiles
-# against must agree with the runtime postgres binary.
-RUN apt-get update \
+# CNPG image runs as uid 26 (postgres); switch to root for package install + build.
+USER root
+# postgresql-server-dev is pinned to the exact version of the postgresql
+# package already installed in the runtime image. apt.postgresql.org only
+# keeps the latest few versions, so the pgdg archive (same signing key) is
+# added to keep older pins installable.
+RUN CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")" \
+    && printf '%s\n' \
+    "Types: deb" \
+    "URIs: https://apt-archive.postgresql.org/pub/repos/apt" \
+    "Suites: ${CODENAME}-pgdg-archive" \
+    "Components: main" \
+    "Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg" \
+    > /etc/apt/sources.list.d/pgdg-archive.sources \
+    && PG_PKG_VERSION="$(dpkg-query -W -f='${Version}' "postgresql-${PG_MAJOR}")" \
+    && echo "Runtime postgresql-${PG_MAJOR} ${PG_PKG_VERSION}" \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -25,7 +32,7 @@ RUN apt-get update \
     curl \
     libssl-dev \
     pkg-config \
-    "postgresql-server-dev-${PG_MAJOR}=${PG_DEV_PKG_VERSION}" \
+    "postgresql-server-dev-${PG_MAJOR}=${PG_PKG_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust toolchain (cargo-pgrx requires llvm-tools-preview)
@@ -68,7 +75,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Stage only the extension artifacts
 RUN mkdir -p /out/lib /out/share/extension \
     && find "/usr/lib/postgresql/${PG_MAJOR}/lib" -name "timescaledb_toolkit*.so" -exec cp {} /out/lib/ \; \
-    && find "/usr/share/postgresql/${PG_MAJOR}/extension" -name "timescaledb_toolkit*" -exec cp {} /out/share/extension/ \;
+    && find "/usr/share/postgresql/${PG_MAJOR}/extension" -name "timescaledb_toolkit*" -exec cp {} /out/share/extension/ \; \
+    && test -f /out/share/extension/timescaledb_toolkit.control
 
 # scratch: zero OS footprint — only the extension .so and SQL files are present.
 FROM scratch

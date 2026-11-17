@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# One-time bridge image for in-place TimescaleDB major-version upgrades in CNPG.
+# TimescaleDB extension image for CNPG, with an upgrade bridge built in.
 #
 # Problem: when CNPG switches to a new extension image that does not contain the
 # OLD versioned loader .so (e.g. timescaledb-2.23.1.so), PostgreSQL cannot load
@@ -23,33 +23,44 @@
 # not just calls to timescaledb functions, since the check runs on backend
 # startup via shared_preload_libraries.
 #
-# Migration procedure
-# -------------------
-#   1. Set CNPG extensionImageRef to this bridge image; wait for cluster healthy.
-#   2. On the primary (NOT via pgbouncer):
+# When OLD_VERSION == VERSION there is nothing to bridge and the build-old
+# stage is skipped.
+#
+# Upgrade procedure
+# -----------------
+#   1. Bump VERSION (OLD_VERSION = currently installed extversion); merge.
+#   2. Point the CNPG cluster at the new image; wait for cluster healthy.
+#   3. On the primary (NOT via pgbouncer), as the first command of a fresh
+#      session (psql -X):
 #        ALTER EXTENSION timescaledb UPDATE;
-#   3. Set CNPG extensionImageRef to the final new-version image.
-#   4. Retire / delete this app from the repo.
+#   4. Set OLD_VERSION = VERSION so the next bump bridges from the new version.
 
-ARG VERSION
-ARG OLD_VERSION
-ARG PG_MAJOR=18
-# Pin the server-dev headers to the EXACT same minor version as the CNPG runtime
-# postgres binary to avoid symbol mismatches at extension load time.
-ARG PG_DEV_PKG_VERSION=18.6-1.pgdg13+2
-ARG RUNTIME_IMAGE=ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:771f9eab5225587af259d84680cc69a5b6e374ac32bb24effafde1f3368a1241
+ARG RUNTIME_IMAGE
 
 # ---------------------------------------------------------------------------
-# Stage 1: build NEW extension files against the exact CNPG runtime image.
+# Build toolchain on top of the exact CNPG runtime image, so headers, pg_config
+# and the postgres binary that will load the extension all agree.
 # ---------------------------------------------------------------------------
-FROM ${RUNTIME_IMAGE} AS build-new
-ARG VERSION
+FROM ${RUNTIME_IMAGE} AS build-base
 ARG PG_MAJOR
-ARG PG_DEV_PKG_VERSION
 
 # CNPG image runs as uid 26 (postgres); switch to root for package install + build.
 USER root
-RUN apt-get update \
+# postgresql-server-dev is pinned to the exact version of the postgresql
+# package already installed in the runtime image. apt.postgresql.org only
+# keeps the latest few versions, so the pgdg archive (same signing key) is
+# added to keep older pins installable.
+RUN CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")" \
+    && printf '%s\n' \
+    "Types: deb" \
+    "URIs: https://apt-archive.postgresql.org/pub/repos/apt" \
+    "Suites: ${CODENAME}-pgdg-archive" \
+    "Components: main" \
+    "Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg" \
+    > /etc/apt/sources.list.d/pgdg-archive.sources \
+    && PG_PKG_VERSION="$(dpkg-query -W -f='${Version}' "postgresql-${PG_MAJOR}")" \
+    && echo "Runtime postgresql-${PG_MAJOR} ${PG_PKG_VERSION}" \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -58,8 +69,14 @@ RUN apt-get update \
     libicu-dev \
     libssl-dev \
     pkg-config \
-    "postgresql-server-dev-${PG_MAJOR}=${PG_DEV_PKG_VERSION}" \
+    "postgresql-server-dev-${PG_MAJOR}=${PG_PKG_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Stage 1: build NEW extension files.
+# ---------------------------------------------------------------------------
+FROM build-base AS build-new
+ARG VERSION
 
 WORKDIR /tmp
 RUN mkdir -p /tmp/src /tmp/built /tmp/out/lib /tmp/out/share/extension \
@@ -83,26 +100,13 @@ RUN mkdir -p /tmp/src /tmp/built /tmp/out/lib /tmp/out/share/extension \
 #          than reusing pre-built bytes from a prior image) guarantees the
 #          compiled-in version string matches OLD_VERSION exactly.
 # ---------------------------------------------------------------------------
-FROM ${RUNTIME_IMAGE} AS build-old
+FROM build-base AS build-old
+ARG VERSION
 ARG OLD_VERSION
-ARG PG_MAJOR
-ARG PG_DEV_PKG_VERSION
-
-USER root
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    cmake \
-    curl \
-    libicu-dev \
-    libssl-dev \
-    pkg-config \
-    "postgresql-server-dev-${PG_MAJOR}=${PG_DEV_PKG_VERSION}" \
-    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp
 RUN mkdir -p /tmp/src /tmp/built /tmp/out/lib \
+    && if [ "${OLD_VERSION}" = "${VERSION}" ]; then echo "OLD_VERSION == VERSION, nothing to bridge"; exit 0; fi \
     && curl -fsSL "https://github.com/timescale/timescaledb/archive/refs/tags/${OLD_VERSION}.tar.gz" \
     | tar xz -C /tmp/src --strip-components=1 \
     && cd /tmp/src \
@@ -114,7 +118,7 @@ RUN mkdir -p /tmp/src /tmp/built /tmp/out/lib \
     && find /tmp/built -type f -name "timescaledb*${OLD_VERSION}.so" -exec cp {} /tmp/out/lib/ \; \
     && test -f "/tmp/out/lib/timescaledb-${OLD_VERSION}.so"
 
-FROM docker.io/library/debian:trixie-slim AS assemble
+FROM build-base AS assemble
 ARG OLD_VERSION
 COPY --from=build-new /tmp/out/lib/ /new/lib/
 COPY --from=build-new /tmp/out/share/extension/ /new/share/extension/
@@ -128,9 +132,8 @@ RUN mkdir -p /out/lib /out/share/extension \
     && test -f "/out/share/extension/timescaledb.control"
 
 # ---------------------------------------------------------------------------
-# Final: scratch image — new version files + single old loader .so
+# Final: scratch image — new version files + single old loader .so, at the
+# standard CNPG extension image layout (/lib, /share/extension).
 # ---------------------------------------------------------------------------
 FROM scratch
-# New-version extension files at standard CNPG scratch layout paths.
 COPY --from=assemble /out/ /
-# Old versioned loader required for ALTER EXTENSION to succeed.
