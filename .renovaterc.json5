@@ -40,10 +40,12 @@
       semanticCommitType: "release",
     },
     {
-      description: ["Auto-merge App Updates"],
+      description: [
+        "Never automerge extension updates: each release must be merged in the runbook order",
+        "(the upgrade-rehearsal tests start from :rolling, which must equal what production runs).",
+      ],
       matchFileNames: ["**/docker-bake.hcl"],
-      automerge: true,
-      ignoreTests: false,
+      automerge: false,
     },
     {
       description: [
@@ -54,6 +56,15 @@
       ],
       prHourlyLimit: 0,
       prPriority: -1,
+    },
+    {
+      description: [
+        "CNPG runtime image: tags like 18.6-standard-trixie need docker versioning",
+        "(the bake manager defaults to semver, which can't parse them and only offers digests).",
+      ],
+      matchDatasources: ["docker"],
+      matchPackageNames: ["ghcr.io/cloudnative-pg/postgresql"],
+      versioning: "docker",
     },
     {
       description: [
@@ -68,11 +79,10 @@
     {
       description: [
         "TimescaleDB: OLD_VERSION must equal the installed extversion and ALTER EXTENSION must be run after rollout.",
-        "Require Dependency Dashboard approval and never automerge.",
+        "Require Dependency Dashboard approval.",
       ],
       matchDepNames: ["timescale/timescaledb"],
       dependencyDashboardApproval: true,
-      automerge: false,
     },
     {
       description: ["TimescaleDB Toolkit: upstream re-tags fixed releases as X.Y.Z+pN"],

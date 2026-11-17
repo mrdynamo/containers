@@ -11,75 +11,196 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test(t *testing.T) {
-	ctx := context.Background()
+const extName = "timescaledb"
 
+var settings = []string{
+	"shared_preload_libraries=timescaledb",
+	"timescaledb.telemetry_level=off",
+}
+
+// TestFreshInstall: the image under test, on the runtime it was built for,
+// installs and runs TimescaleDB, including jobs run by the background
+// scheduler.
+func TestFreshInstall(t *testing.T) {
+	ctx := context.Background()
 	version := testhelpers.BakeVariable(t, "VERSION")
 	oldVersion := testhelpers.BakeVariable(t, "OLD_VERSION")
-	image := testhelpers.GetTestImage("ghcr.io/mrdynamo/timescaledb-bridge:rolling")
 
-	c := testhelpers.StartPostgresWithExtension(t, ctx, testhelpers.PostgresExtensionConfig{
-		ExtensionImage: image,
-		RuntimeImage:   testhelpers.BakeVariable(t, "RUNTIME_IMAGE"),
-		PGMajor:        testhelpers.BakeVariable(t, "PG_MAJOR"),
-		Name:           "timescaledb",
-		Settings: []string{
-			"shared_preload_libraries=timescaledb",
-			"timescaledb.telemetry_level=off",
-		},
+	pg := testhelpers.NewPostgres(t, ctx, testhelpers.BakeVariable(t, "PG_MAJOR"), settings...)
+	pg.Start(testhelpers.Phase{
+		RuntimeImage: testhelpers.BakeVariable(t, "RUNTIME_IMAGE"),
+		Extensions:   map[string]string{extName: testhelpers.GetTestImage("ghcr.io/mrdynamo/timescaledb-bridge:rolling")},
 	})
 
-	// The bridge part: the installed (old) versioned loader must be present,
-	// plus an update script from it when it differs from VERSION.
-	testhelpers.RequireFile(t, ctx, c, fmt.Sprintf("/extensions/timescaledb/lib/timescaledb-%s.so", oldVersion))
+	// The bridge: the installed (old) versioned libraries must be present,
+	// plus a direct update script from OLD_VERSION when it differs.
+	pg.RequireFile(fmt.Sprintf("/extensions/timescaledb/lib/timescaledb-%s.so", oldVersion))
+	pg.RequireFile(fmt.Sprintf("/extensions/timescaledb/lib/timescaledb-tsl-%s.so", oldVersion))
 	if oldVersion != version {
-		testhelpers.RequireFile(t, ctx, c,
-			fmt.Sprintf("/extensions/timescaledb/share/extension/timescaledb--%s--%s.sql", oldVersion, version))
+		pg.RequireFile(fmt.Sprintf("/extensions/timescaledb/share/extension/timescaledb--%s--%s.sql", oldVersion, version))
 	}
 
-	testhelpers.Psql(t, ctx, c, "CREATE EXTENSION timescaledb")
-	require.Equal(t, version,
-		testhelpers.Psql(t, ctx, c, "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'"))
+	pg.Psql("CREATE EXTENSION timescaledb")
+	require.Equal(t, version, extVersion(pg))
 
-	testhelpers.Psql(t, ctx, c, `
+	jobs := createWorkload(t, pg)
+	waitForJobs(t, pg, jobs, dbNow(pg))
+	verifyData(t, pg)
+}
+
+// TestUpgradeFromReleased rehearses the production rollout:
+//  1. the released image (PREVIOUS_IMAGE, default :rolling) on the runtime it
+//     was built for, with the extension installed and jobs running;
+//  2. CNPG restarts the instance with the new runtime + the image under test
+//     on the same data directory — before ALTER EXTENSION, connections and
+//     jobs must keep working on the old extension version (this is where a
+//     missing versioned loader makes every connection FATAL);
+//  3. ALTER EXTENSION timescaledb UPDATE as the first command of a new
+//     session (psql -X), exactly as in the runbook;
+//  4. extension at VERSION, all jobs succeed via the scheduler, data intact.
+func TestUpgradeFromReleased(t *testing.T) {
+	ctx := context.Background()
+	version := testhelpers.BakeVariable(t, "VERSION")
+	oldVersion := testhelpers.BakeVariable(t, "OLD_VERSION")
+	runtime := testhelpers.BakeVariable(t, "RUNTIME_IMAGE")
+	previous := testhelpers.PreviousImage("ghcr.io/mrdynamo/timescaledb-bridge:rolling")
+	image := testhelpers.GetTestImage("ghcr.io/mrdynamo/timescaledb-bridge:rolling")
+
+	pg := testhelpers.NewPostgres(t, ctx, testhelpers.BakeVariable(t, "PG_MAJOR"), settings...)
+	previousRuntime := pg.ImageRuntime(previous, runtime)
+	t.Logf("from: %s on %s", previous, previousRuntime)
+	t.Logf("to:   %s on %s", image, runtime)
+
+	// 1. Released state.
+	pg.Start(testhelpers.Phase{RuntimeImage: previousRuntime, Extensions: map[string]string{extName: previous}})
+	pg.Psql("CREATE EXTENSION timescaledb")
+	installed := extVersion(pg)
+	require.Equal(t, oldVersion, installed,
+		"the released image installs %s but OLD_VERSION is %s; OLD_VERSION must be the version running in production", installed, oldVersion)
+	jobs := createWorkload(t, pg)
+	waitForJobs(t, pg, jobs, dbNow(pg))
+	pauseJobs(t, pg, jobs)
+
+	// 2. Rolling update: new runtime + new extension image, same data.
+	pg.Start(testhelpers.Phase{RuntimeImage: runtime, Extensions: map[string]string{extName: image}})
+	require.Equal(t, oldVersion, extVersion(pg), "extension must still be at the old version before ALTER")
+	verifyData(t, pg)
+	since := dbNow(pg)
+	resumeJobs(pg, jobs)
+	waitForJobs(t, pg, jobs, since)
+	pauseJobs(t, pg, jobs)
+
+	// 3. The runbook step.
+	pg.Psql("ALTER EXTENSION timescaledb UPDATE")
+
+	// 4. Upgraded state.
+	require.Equal(t, version, extVersion(pg))
+	verifyData(t, pg)
+	since = dbNow(pg)
+	resumeJobs(pg, jobs)
+	waitForJobs(t, pg, jobs, since)
+}
+
+func extVersion(pg *testhelpers.Postgres) string {
+	return pg.Psql("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'")
+}
+
+func dbNow(pg *testhelpers.Postgres) string {
+	return pg.Psql("SELECT now()")
+}
+
+// createWorkload mirrors what Tracearr runs in production: a compressed
+// hypertable with a compression policy, a continuous aggregate with a
+// refresh policy, and a retention policy. Returns the job ids.
+func createWorkload(t *testing.T, pg *testhelpers.Postgres) []string {
+	t.Helper()
+
+	pg.Psql(`
 		CREATE TABLE metrics (time timestamptz NOT NULL, value double precision);
 		SELECT create_hypertable('metrics', by_range('time', INTERVAL '1 day'));
 		INSERT INTO metrics
 			SELECT ts, random() FROM generate_series(now() - INTERVAL '3 days', now(), INTERVAL '1 minute') ts;
 		ALTER TABLE metrics SET (timescaledb.compress);
+		CREATE MATERIALIZED VIEW metrics_hourly WITH (timescaledb.continuous) AS
+			SELECT time_bucket(INTERVAL '1 hour', time) AS bucket, count(*) AS n, avg(value) AS avg_value
+			FROM metrics GROUP BY 1 WITH NO DATA;
 	`)
-
-	// Run a policy through the background scheduler, not run_job(): that is
-	// the path that breaks when the extension and server minor disagree
-	// (e.g. TimescaleDB < 2.32.1 on PostgreSQL 18.7: "cannot drop portal").
-	jobID := testhelpers.Psql(t, ctx, c, `
+	jobs := strings.Fields(pg.Psql(`
 		SELECT add_compression_policy('metrics', compress_after => INTERVAL '1 hour',
-			schedule_interval => INTERVAL '5 seconds', initial_start => now())`)
+			schedule_interval => INTERVAL '5 seconds', initial_start => now());
+		SELECT add_continuous_aggregate_policy('metrics_hourly', start_offset => INTERVAL '7 days',
+			end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 seconds', initial_start => now());
+		SELECT add_retention_policy('metrics', drop_after => INTERVAL '30 days',
+			schedule_interval => INTERVAL '5 seconds', initial_start => now());
+	`))
+	require.Len(t, jobs, 3)
+	return jobs
+}
 
-	deadline := time.Now().Add(90 * time.Second)
+// waitForJobs waits until every job has finished successfully after `since`
+// (read from the bgw_job_stat catalog: the job_stats view has no crash count),
+// run by the background scheduler (not run_job(): the scheduler path is what
+// breaks when the extension and server minor disagree, e.g. TimescaleDB
+// < 2.32.1 on PostgreSQL 18.7: "cannot drop portal"). Any failure or crash
+// fails the test.
+func waitForJobs(t *testing.T, pg *testhelpers.Postgres, jobs []string, since string) {
+	t.Helper()
+
+	ids := strings.Join(jobs, ",")
+	deadline := time.Now().Add(2 * time.Minute)
 	for {
-		stats := testhelpers.Psql(t, ctx, c, fmt.Sprintf(`
-			SELECT coalesce(total_successes, 0) || '|' || coalesce(total_failures, 0)
-			FROM timescaledb_information.job_stats WHERE job_id = %s`, jobID))
-		if stats != "" {
-			successes, failures, _ := strings.Cut(stats, "|")
-			if failures != "0" {
-				errs := testhelpers.Psql(t, ctx, c, fmt.Sprintf(
-					"SELECT string_agg(err_message, E'\\n') FROM timescaledb_information.job_errors WHERE job_id = %s", jobID))
-				t.Fatalf("background job %s failed: %s", jobID, errs)
-			}
-			if successes != "0" {
-				break
-			}
+		status := pg.Psql(fmt.Sprintf(`
+			SELECT count(*) FILTER (WHERE last_successful_finish > '%s')
+				|| '|' || coalesce(sum(total_failures), 0) || '|' || coalesce(sum(total_crashes), 0)
+			FROM _timescaledb_internal.bgw_job_stat WHERE job_id IN (%s)`, since, ids))
+		parts := strings.Split(status, "|")
+		require.Len(t, parts, 3, "unexpected job_stats output %q", status)
+		if parts[1] != "0" || parts[2] != "0" {
+			errs := pg.Psql(fmt.Sprintf(`
+				SELECT string_agg(job_id || ': ' || coalesce(err_message, '?'), E'\n')
+				FROM timescaledb_information.job_errors WHERE job_id IN (%s)`, ids))
+			t.Fatalf("jobs failed (failures=%s crashes=%s):\n%s\n--- postgres.log ---\n%s", parts[1], parts[2], errs, pg.LogTail())
+		}
+		if parts[0] == fmt.Sprint(len(jobs)) {
+			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("background job %s did not run within 90s (stats: %q)", jobID, stats)
+			t.Fatalf("only %s/%d jobs succeeded since %s within 2m\n--- postgres.log ---\n%s", parts[0], len(jobs), since, pg.LogTail())
 		}
 		time.Sleep(2 * time.Second)
 	}
+}
 
-	compressed := testhelpers.Psql(t, ctx, c,
-		"SELECT count(*) FROM chunk_compression_stats('metrics') WHERE compression_status = 'Compressed'")
-	require.NotEqual(t, "0", compressed, "expected the policy to compress at least one chunk")
-	require.Equal(t, "4321", testhelpers.Psql(t, ctx, c, "SELECT count(*) FROM metrics"))
+// pauseJobs unschedules the jobs and waits until none is running, so the
+// test's own fast shutdown never interrupts a job (an interrupted job counts
+// as a crash and is held back for 5 minutes).
+func pauseJobs(t *testing.T, pg *testhelpers.Postgres, jobs []string) {
+	t.Helper()
+
+	for _, id := range jobs {
+		pg.Psql(fmt.Sprintf("SELECT alter_job(%s, scheduled => false)", id))
+	}
+	deadline := time.Now().Add(time.Minute)
+	for pg.Psql(fmt.Sprintf(
+		"SELECT count(*) FROM timescaledb_information.job_stats WHERE job_status = 'Running' AND job_id IN (%s)",
+		strings.Join(jobs, ","))) != "0" {
+		if time.Now().After(deadline) {
+			t.Fatalf("jobs still running 1m after being unscheduled\n--- postgres.log ---\n%s", pg.LogTail())
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+func resumeJobs(pg *testhelpers.Postgres, jobs []string) {
+	for _, id := range jobs {
+		pg.Psql(fmt.Sprintf("SELECT alter_job(%s, scheduled => true, next_start => now())", id))
+	}
+}
+
+func verifyData(t *testing.T, pg *testhelpers.Postgres) {
+	t.Helper()
+
+	// 3 days of 1-minute points, inclusive of both ends.
+	require.Equal(t, "4321", pg.Psql("SELECT count(*) FROM metrics"))
+	require.Equal(t, "t", pg.Psql("SELECT count(*) > 0 FROM metrics_hourly"))
 }

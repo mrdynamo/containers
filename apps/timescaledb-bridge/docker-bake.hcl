@@ -56,6 +56,9 @@ target "image" {
   }
   labels = {
     "org.opencontainers.image.source" = "${SOURCE}"
+    # Read by the upgrade-rehearsal tests to start the previous release on
+    # the runtime it was built for.
+    "io.github.mrdynamo.runtime-image" = "${RUNTIME_IMAGE}"
   }
 }
 
