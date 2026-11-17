@@ -4,7 +4,7 @@ ARG VERSION
 ARG PG_MAJOR=18
 # Pin the builder base AND the dev-headers package to the exact PG minor version
 # used by the CNPG runtime to avoid symbol mismatches at extension load time.
-ARG PG_IMAGE=docker.io/library/postgres:18.6-trixie@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941
+ARG PG_IMAGE=docker.io/library/postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
 ARG PG_DEV_PKG_VERSION=18.6-1.pgdg13+2
 
 # Use a pinned minor-version postgres image so pg_config and the installed binary
