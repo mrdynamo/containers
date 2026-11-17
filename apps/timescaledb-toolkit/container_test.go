@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -109,6 +110,11 @@ func verifyFunctions(t *testing.T, pg *testhelpers.Postgres) {
 		FROM generate_series(1, 1000) x`))
 	require.Equal(t, "500.5", pg.Psql(`
 		SELECT average(stats_agg(x::double precision)) FROM generate_series(1, 1000) x`))
-	require.Equal(t, "t", pg.Psql(`
-		SELECT distinct_count(hyperloglog(64, x)) BETWEEN 900 AND 1100 FROM generate_series(1, 1000) x`))
+	// HyperLogLog is an estimate: 4096 buckets keeps the standard error around
+	// 1.6% (1.04/sqrt(buckets)), well inside the +/-10% window. (64 buckets is
+	// ~13% and misses it.)
+	hll := pg.Psql(`SELECT distinct_count(hyperloglog(4096, x)) FROM generate_series(1, 1000) x`)
+	n, err := strconv.Atoi(hll)
+	require.NoError(t, err, "distinct_count returned %q", hll)
+	require.InDelta(t, 1000, n, 100, "hyperloglog estimate for 1000 distinct values was %d", n)
 }
