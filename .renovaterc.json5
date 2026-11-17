@@ -80,9 +80,11 @@
       description: [
         "TimescaleDB: OLD_VERSION must equal the installed extversion and ALTER EXTENSION must be run after rollout.",
         "Require Dependency Dashboard approval.",
+        "Nothing older than 2.32.1: every earlier release breaks background jobs on PostgreSQL 18.7 (timescale/timescaledb#11038).",
       ],
       matchDepNames: ["timescale/timescaledb"],
       dependencyDashboardApproval: true,
+      allowedVersions: ">=2.32.1",
     },
     {
       description: ["TimescaleDB Toolkit: upstream re-tags fixed releases as X.Y.Z+pN"],

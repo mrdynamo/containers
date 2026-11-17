@@ -13,7 +13,9 @@ USER root
 # postgresql-server-dev is pinned to the exact version of the postgresql
 # package already installed in the runtime image. apt.postgresql.org only
 # keeps the latest few versions, so the pgdg archive (same signing key) is
-# added to keep older pins installable.
+# added to keep older pins installable. The archive also holds newer majors'
+# pre-releases (e.g. libpq5 19~rc2), so it gets a low pin priority: it only
+# supplies a package when that exact version is requested.
 RUN CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")" \
     && printf '%s\n' \
     "Types: deb" \
@@ -22,8 +24,14 @@ RUN CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")" \
     "Components: main" \
     "Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg" \
     > /etc/apt/sources.list.d/pgdg-archive.sources \
+    && printf '%s\n' \
+    "Package: *" \
+    "Pin: origin apt-archive.postgresql.org" \
+    "Pin-Priority: 100" \
+    > /etc/apt/preferences.d/pgdg-archive.pref \
     && PG_PKG_VERSION="$(dpkg-query -W -f='${Version}' "postgresql-${PG_MAJOR}")" \
-    && echo "Runtime postgresql-${PG_MAJOR} ${PG_PKG_VERSION}" \
+    && LIBPQ_VERSION="$(dpkg-query -W -f='${Version}' libpq5)" \
+    && echo "Runtime postgresql-${PG_MAJOR} ${PG_PKG_VERSION}, libpq5 ${LIBPQ_VERSION}" \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
     build-essential \
@@ -33,6 +41,8 @@ RUN CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")" \
     libssl-dev \
     pkg-config \
     "postgresql-server-dev-${PG_MAJOR}=${PG_PKG_VERSION}" \
+    "libpq-dev=${LIBPQ_VERSION}" \
+    "libpq5=${LIBPQ_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust toolchain (cargo-pgrx requires llvm-tools-preview)
