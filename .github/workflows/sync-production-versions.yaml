@@ -1,0 +1,97 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Sync Production Versions
+
+# Keeps OLD_VERSION in apps/timescaledb-{bridge,toolkit}/docker-bake.hcl equal
+# to the extension versions production runs: the tag of each extension image
+# in the CNPG Cluster that Flux deploys from mrdynamo/home-ops main. The images
+# bundle the OLD_VERSION libraries so the database keeps working on a new image
+# until ALTER EXTENSION ... UPDATE.
+#
+# It opens (or updates) a PR; it never merges. The home-ops tag changes when
+# the home-ops PR is merged, but the database only after the ALTER, and the
+# images built from this PR drop the previous version's library. Merge it only
+# after the ALTER (docs/cnpg-timescaledb-extension-upgrade.md in home-ops).
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-production-versions
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync OLD_VERSION
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read Production and Update OLD_VERSION
+        id: sync
+        env:
+          CLUSTER_URL: https://raw.githubusercontent.com/mrdynamo/home-ops/main/kubernetes/apps/database/cloudnative-pg/cluster/cluster.yaml
+        run: |-
+          set -euo pipefail
+          curl -fsSL "${CLUSTER_URL}" -o "${RUNNER_TEMP}/cluster.yaml"
+
+          # Tag of a production extension image: repo:TAG@sha256:...
+          tag() {
+            local ref
+            ref=$(yq ".spec.postgresql.extensions[] | select(.name == \"$1\") | .image.reference" "${RUNNER_TEMP}/cluster.yaml")
+            ref=${ref%@*}
+            ref=${ref##*:}
+            if [[ ! ${ref} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::could not read the production version of $1 (got '${ref}')"
+              exit 1
+            fi
+            echo "${ref}"
+          }
+
+          set_old() {
+            sed -i "/^variable \"OLD_VERSION\" {/,/^}/ s/default = \".*\"/default = \"$2\"/" "apps/$1/docker-bake.hcl"
+          }
+
+          bridge=$(tag timescaledb)
+          toolkit=$(tag timescaledb_toolkit)
+          set_old timescaledb-bridge "${bridge}"
+          set_old timescaledb-toolkit "${toolkit}"
+
+          echo "Production: timescaledb ${bridge}, timescaledb_toolkit ${toolkit}"
+          git diff
+          {
+            echo "timescaledb=${bridge}"
+            echo "toolkit=${toolkit}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Generate Token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app-token
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
+        with:
+          branch: sync/production-versions
+          delete-branch: true
+          commit-message: "chore(timescaledb): OLD_VERSION = production (timescaledb ${{ steps.sync.outputs.timescaledb }}, timescaledb_toolkit ${{ steps.sync.outputs.toolkit }})"
+          title: "chore(timescaledb): OLD_VERSION = production (timescaledb ${{ steps.sync.outputs.timescaledb }}, timescaledb_toolkit ${{ steps.sync.outputs.toolkit }})"
+          body: |
+            Production (`mrdynamo/home-ops` `main`) now runs **timescaledb `${{ steps.sync.outputs.timescaledb }}`** and **timescaledb_toolkit `${{ steps.sync.outputs.toolkit }}`**. This sets `OLD_VERSION` to match.
+
+            > [!WARNING]
+            > **Merge only after `ALTER EXTENSION … UPDATE` has been run in production** for the extension(s) changed here. The images built from this PR no longer carry the previous version's library; deployed before the ALTER, every connection fails (TimescaleDB) or toolkit functions error.
+            >
+            > Check first: `extver` from `docs/cnpg-timescaledb-extension-upgrade.md` in home-ops must show these versions installed.
+          sign-commits: true
+          signoff: true
+          token: ${{ steps.app-token.outputs.token }}

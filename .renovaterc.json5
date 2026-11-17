@@ -41,8 +41,8 @@
     },
     {
       description: [
-        "Never automerge extension updates: each release must be merged in the runbook order",
-        "(the upgrade-rehearsal tests start from :rolling, which must equal what production runs).",
+        "Extension builds don't automerge by default (this covers CNPG runtime rebuilds: they republish",
+        "the same version tag built for another PostgreSQL minor, and must land with the home-ops runtime change).",
       ],
       matchFileNames: ["**/docker-bake.hcl"],
       automerge: false,
@@ -78,13 +78,13 @@
     },
     {
       description: [
-        "TimescaleDB: OLD_VERSION must equal the installed extversion and ALTER EXTENSION must be run after rollout.",
-        "Require Dependency Dashboard approval.",
-        "Nothing older than 2.32.1: every earlier release breaks background jobs on PostgreSQL 18.7 (timescale/timescaledb#11038).",
+        "New extension versions are built and published as soon as their PR passes the tests, including",
+        "the rehearsal of the upgrade from production (home-ops main). Deploying is gated in home-ops:",
+        "a published image changes nothing until its home-ops PR is merged and ALTER EXTENSION is run.",
       ],
-      matchDepNames: ["timescale/timescaledb"],
-      dependencyDashboardApproval: true,
-      allowedVersions: ">=2.32.1",
+      matchDepNames: ["timescale/timescaledb", "timescale/timescaledb-toolkit"],
+      automerge: true,
+      ignoreTests: false,
     },
     {
       description: ["TimescaleDB Toolkit: upstream re-tags fixed releases as X.Y.Z+pN"],

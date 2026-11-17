@@ -43,15 +43,6 @@ func BakeVariable(t *testing.T, name string) string {
 	return string(m[1])
 }
 
-// PreviousImage returns the released image an upgrade is rehearsed from:
-// PREVIOUS_IMAGE if set, otherwise the given default (normally :rolling).
-func PreviousImage(defaultImage string) string {
-	if image := os.Getenv("PREVIOUS_IMAGE"); image != "" {
-		return image
-	}
-	return defaultImage
-}
-
 // Phase is one "pod spec" of the cluster: a CNPG runtime image plus the
 // extension images mounted into it, keyed by CNPG extension name.
 type Phase struct {
@@ -280,6 +271,20 @@ func (p *Postgres) ImageRuntime(image, fallback string) string {
 	}
 	p.t.Logf("%s has no %s label; using %s", image, RuntimeImageLabel, fallback)
 	return fallback
+}
+
+// TargetRuntime is the runtime production runs after deploying image:
+// TARGET_RUNTIME_IMAGE if set, otherwise the runtime the image was built for
+// (its label), otherwise fallback. Extension images are deployed together
+// with the runtime they were built for, so the label is normally right; the
+// override exists for rehearsing an image on a different runtime.
+func (p *Postgres) TargetRuntime(image, fallback string) string {
+	p.t.Helper()
+
+	if v := os.Getenv("TARGET_RUNTIME_IMAGE"); v != "" {
+		return v
+	}
+	return p.ImageRuntime(image, fallback)
 }
 
 func apiVersionAtLeast(v string, major, minor int) bool {

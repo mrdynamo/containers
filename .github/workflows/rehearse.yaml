@@ -1,0 +1,40 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Rehearse
+
+# Re-runs an app's tests, including the rehearsal of the upgrade from
+# production (mrdynamo/home-ops main, read at run time), against an already
+# published image. Run it right before merging the home-ops change that
+# deploys that image: the image is tested exactly as published, against
+# production as it is now.
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        type: string
+        description: App Name (e.g. timescaledb-bridge)
+        required: true
+      image:
+        type: string
+        description: Image to rehearse, as it will be deployed (repo:tag@sha256:digest)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  rehearse:
+    name: Rehearse ${{ inputs.app }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run App Tests
+        uses: ./.github/actions/app-tests
+        with:
+          app: ${{ inputs.app }}
+          image: ${{ inputs.image }}
+          token: ${{ github.token }}

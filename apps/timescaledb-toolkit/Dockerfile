@@ -1,11 +1,23 @@
 # syntax=docker/dockerfile:1
+#
+# timescaledb_toolkit extension image for CNPG.
+#
+# Like the TimescaleDB image, it also carries the shared library of the version
+# production runs (OLD_VERSION): installed toolkit functions reference
+# $libdir/timescaledb_toolkit-<installed version>, so without it every toolkit
+# function errors from rollout until ALTER EXTENSION timescaledb_toolkit UPDATE.
+# Both are built from source the same way (scripts/build-toolkit.sh; only
+# scripts/ is in the build context, see include/.dockerignore) against the exact
+# CNPG runtime. When OLD_VERSION == VERSION the build-old stage is skipped.
 
 ARG RUNTIME_IMAGE
 
-# Build on the exact CNPG runtime image so pg_config, the headers pgrx compiles
-# against, and the postgres binary that loads the extension all agree.
-FROM ${RUNTIME_IMAGE} AS builder
-ARG VERSION
+# ---------------------------------------------------------------------------
+# Toolchain on top of the exact CNPG runtime image, so pg_config, the headers
+# pgrx compiles against, and the postgres binary that loads the extension all
+# agree.
+# ---------------------------------------------------------------------------
+FROM ${RUNTIME_IMAGE} AS build-base
 ARG PG_MAJOR
 
 # CNPG image runs as uid 26 (postgres); switch to root for package install + build.
@@ -45,49 +57,47 @@ RUN CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")" \
     "libpq5=${LIBPQ_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Rust toolchain (cargo-pgrx requires llvm-tools-preview)
+# Rust toolchain (cargo-pgrx requires llvm-tools-preview)
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:$PATH
+    PATH=/usr/local/cargo/bin:$PATH \
+    PG_MAJOR=${PG_MAJOR}
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable \
     && rustup component add llvm-tools-preview
 
-# Download toolkit source at the pinned release tag
-RUN mkdir -p /build \
-    && curl -fsSL "https://github.com/timescale/timescaledb-toolkit/archive/refs/tags/${VERSION}.tar.gz" \
-    | tar xzf - -C /build --strip-components=1
+COPY --chmod=0755 scripts/build-toolkit.sh /usr/local/bin/build-toolkit
 
-# Install cargo-pgrx at the exact version pinned in the upstream extension/Cargo.toml
-# (the comment in that file says: "Keep synchronized with cargo install --version N.N.N cargo-pgrx")
+# ---------------------------------------------------------------------------
+# Stage 1: the new version (VERSION is the upstream tag, e.g. 1.27.0+p2).
+# ---------------------------------------------------------------------------
+FROM build-base AS build-new
+ARG VERSION
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    PGRX_VER=$(grep '^pgrx = "=' /build/extension/Cargo.toml | head -1 | sed 's/pgrx = "=//;s/"//') \
-    && cargo install --version "=${PGRX_VER}" --force cargo-pgrx
+    build-toolkit "${VERSION}" /out full
 
-# Point pgrx at the already-installed system PostgreSQL; no download needed
-RUN cargo pgrx init "--pg${PG_MAJOR}" "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config"
-
-WORKDIR /build/extension
-
-# Build and install the .so + SQL files into the PostgreSQL installation
+# ---------------------------------------------------------------------------
+# Stage 2: only the library of the version production runs.
+# ---------------------------------------------------------------------------
+FROM build-base AS build-old
+ARG VERSION
+ARG OLD_VERSION
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target \
-    cargo pgrx install --release \
-    --pg-config "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config"
+    mkdir -p /out/lib \
+    && if [ "${OLD_VERSION}" = "${VERSION%%+*}" ]; then echo "OLD_VERSION == VERSION, nothing to bundle"; exit 0; fi \
+    && build-toolkit "${OLD_VERSION}" /out lib
 
-# Run the upstream post-install tool to finalise SQL upgrade scripts
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target \
-    cargo run \
-    --manifest-path ../tools/post-install/Cargo.toml -- \
-    "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_config"
+FROM build-base AS assemble
+ARG VERSION
+ARG OLD_VERSION
+COPY --from=build-new /out/ /assembled/
+COPY --from=build-old /out/lib/ /assembled/lib/
+RUN test -f "/assembled/lib/timescaledb_toolkit-${VERSION%%+*}.so" \
+    && test -f "/assembled/lib/timescaledb_toolkit-${OLD_VERSION}.so" \
+    && test -f /assembled/share/extension/timescaledb_toolkit.control \
+    && ls -l /assembled/lib/
 
-# Stage only the extension artifacts
-RUN mkdir -p /out/lib /out/share/extension \
-    && find "/usr/lib/postgresql/${PG_MAJOR}/lib" -name "timescaledb_toolkit*.so" -exec cp {} /out/lib/ \; \
-    && find "/usr/share/postgresql/${PG_MAJOR}/extension" -name "timescaledb_toolkit*" -exec cp {} /out/share/extension/ \; \
-    && test -f /out/share/extension/timescaledb_toolkit.control
-
-# scratch: zero OS footprint — only the extension .so and SQL files are present.
+# scratch: zero OS footprint — only the extension .so and SQL files are present,
+# at the standard CNPG extension image layout (/lib, /share/extension).
 FROM scratch
-COPY --from=builder /out /
+COPY --from=assemble /assembled/ /

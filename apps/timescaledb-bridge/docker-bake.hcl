@@ -5,17 +5,15 @@ variable "APP" {
 }
 
 # VERSION     = the TimescaleDB release this image ships (upgrade TO).
-# OLD_VERSION = the exact extversion currently installed in the database
-#               (upgrade FROM). Verify with:
-#   SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';
+#               Renovate bumps it; the PR merges itself once the tests pass.
+# OLD_VERSION = the version production runs (upgrade FROM): its libraries are
+#               bundled so the database keeps working on the new image until
+#               ALTER EXTENSION timescaledb UPDATE. The sync-production-versions
+#               workflow keeps it in sync with home-ops main (PR); merge that
+#               PR only after the ALTER.
 # The old loader is rebuilt from source (see Dockerfile build-old stage) with
-# version.config patched to this exact string, so OLD_VERSION must match the
-# catalog extversion, not necessarily the raw upstream git tag.
-#
-# Renovate only proposes VERSION bumps after approval on the Dependency
-# Dashboard and never automerges them: OLD_VERSION must be correct for the
-# database first, and ALTER EXTENSION has to be run after rollout. After the
-# ALTER, set OLD_VERSION = VERSION.
+# version.config patched to this exact string, so it must match the catalog
+# extversion. TestUpgradeFromProduction fails if it is not production's.
 
 variable "VERSION" {
   // renovate: datasource=github-releases depName=timescale/timescaledb
@@ -56,8 +54,8 @@ target "image" {
   }
   labels = {
     "org.opencontainers.image.source" = "${SOURCE}"
-    # Read by the upgrade-rehearsal tests to start the previous release on
-    # the runtime it was built for.
+    # Read by the upgrade-rehearsal tests: an image is rehearsed on the
+    # runtime it was built for (the runtime production will run with it).
     "io.github.mrdynamo.runtime-image" = "${RUNTIME_IMAGE}"
   }
 }

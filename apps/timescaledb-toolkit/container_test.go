@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,19 +12,6 @@ import (
 
 const extName = "timescaledb_toolkit"
 
-// Production runs the toolkit next to TimescaleDB (preloaded); so do the tests.
-var settings = []string{
-	"shared_preload_libraries=timescaledb",
-	"timescaledb.telemetry_level=off",
-}
-
-func timescaledbImage() string {
-	if image := os.Getenv("TIMESCALEDB_IMAGE"); image != "" {
-		return image
-	}
-	return "ghcr.io/mrdynamo/timescaledb-bridge:rolling"
-}
-
 // cleanVersion: upstream tags fixed releases as X.Y.Z+pN; the extension
 // version is X.Y.Z.
 func cleanVersion(t *testing.T) string {
@@ -34,62 +20,71 @@ func cleanVersion(t *testing.T) string {
 }
 
 // TestFreshInstall: the image under test installs and works on the runtime
-// it was built for.
+// it was built for, next to production's TimescaleDB (preloaded), as in
+// production.
 func TestFreshInstall(t *testing.T) {
 	ctx := context.Background()
 	version := cleanVersion(t)
+	prod := testhelpers.Production(t)
 
-	pg := testhelpers.NewPostgres(t, ctx, testhelpers.BakeVariable(t, "PG_MAJOR"), settings...)
+	pg := testhelpers.NewPostgres(t, ctx, testhelpers.BakeVariable(t, "PG_MAJOR"), prod.Settings...)
 	pg.Start(testhelpers.Phase{
 		RuntimeImage: testhelpers.BakeVariable(t, "RUNTIME_IMAGE"),
-		Extensions: map[string]string{
-			"timescaledb": timescaledbImage(),
-			extName:       testhelpers.GetTestImage("ghcr.io/mrdynamo/timescaledb-toolkit:rolling"),
-		},
+		Extensions:   prod.With(extName, testhelpers.GetTestImage("ghcr.io/mrdynamo/timescaledb-toolkit:rolling")),
 	})
 
-	pg.Psql("CREATE EXTENSION timescaledb")
-	pg.Psql("CREATE EXTENSION timescaledb_toolkit")
+	for name := range prod.Extensions {
+		pg.Psql("CREATE EXTENSION " + name)
+	}
 	// Catches upstream tags whose crate version still says "-dev", which
 	// leaves no ALTER EXTENSION ... UPDATE path to or from this release.
 	require.Equal(t, version, extVersion(pg))
 	pg.RequireFile("/extensions/timescaledb_toolkit/lib/timescaledb_toolkit-" + version + ".so")
 	verifyFunctions(t, pg)
+
+	// The bundled library of the version production runs, and the update
+	// script from it.
+	oldVersion := testhelpers.BakeVariable(t, "OLD_VERSION")
+	pg.RequireFile("/extensions/timescaledb_toolkit/lib/timescaledb_toolkit-" + oldVersion + ".so")
+	if oldVersion != version {
+		pg.RequireFile("/extensions/timescaledb_toolkit/share/extension/timescaledb_toolkit--" + oldVersion + "--" + version + ".sql")
+	}
 }
 
-// TestUpgradeFromReleased rehearses the production rollout: released image on
-// its runtime -> CNPG restart with the new runtime + image under test on the
-// same data -> ALTER EXTENSION timescaledb_toolkit UPDATE in a new session.
-func TestUpgradeFromReleased(t *testing.T) {
+// TestUpgradeFromProduction rehearses deploying the image under test:
+// production exactly (from mrdynamo/home-ops main) -> CNPG restart with the
+// image under test on its runtime, same data: toolkit functions must keep
+// working on the old version (its library is bundled) -> ALTER EXTENSION
+// timescaledb_toolkit UPDATE in a new session -> functions work on the new
+// version.
+func TestUpgradeFromProduction(t *testing.T) {
 	ctx := context.Background()
 	version := cleanVersion(t)
-	runtime := testhelpers.BakeVariable(t, "RUNTIME_IMAGE")
-	previous := testhelpers.PreviousImage("ghcr.io/mrdynamo/timescaledb-toolkit:rolling")
 	image := testhelpers.GetTestImage("ghcr.io/mrdynamo/timescaledb-toolkit:rolling")
+	prod := testhelpers.Production(t)
+	require.Contains(t, prod.Extensions, extName, "production has no %s extension", extName)
 
-	pg := testhelpers.NewPostgres(t, ctx, testhelpers.BakeVariable(t, "PG_MAJOR"), settings...)
-	previousRuntime := pg.ImageRuntime(previous, runtime)
-	t.Logf("from: %s on %s", previous, previousRuntime)
-	t.Logf("to:   %s on %s", image, runtime)
+	pg := testhelpers.NewPostgres(t, ctx, testhelpers.BakeVariable(t, "PG_MAJOR"), prod.Settings...)
+	target := pg.TargetRuntime(image, testhelpers.BakeVariable(t, "RUNTIME_IMAGE"))
+	t.Logf("from (production): %s", prod)
+	t.Logf("to: %s=%s on %s", extName, image, target)
 
-	pg.Start(testhelpers.Phase{
-		RuntimeImage: previousRuntime,
-		Extensions:   map[string]string{"timescaledb": timescaledbImage(), extName: previous},
-	})
-	pg.Psql("CREATE EXTENSION timescaledb")
-	pg.Psql("CREATE EXTENSION timescaledb_toolkit")
+	pg.Start(testhelpers.Phase{RuntimeImage: prod.RuntimeImage, Extensions: prod.Extensions})
+	for name := range prod.Extensions {
+		pg.Psql("CREATE EXTENSION " + name)
+	}
 	installed := extVersion(pg)
+	oldVersion := testhelpers.BakeVariable(t, "OLD_VERSION")
+	require.Equal(t, oldVersion, installed,
+		"production runs timescaledb_toolkit %s but OLD_VERSION is %s; OLD_VERSION must be the version running in production", installed, oldVersion)
 	verifyFunctions(t, pg)
 
-	pg.Start(testhelpers.Phase{
-		RuntimeImage: runtime,
-		Extensions:   map[string]string{"timescaledb": timescaledbImage(), extName: image},
-	})
-	// Before ALTER: the database is still on the old toolkit version and
-	// sessions must work (toolkit functions themselves point at the old .so
-	// until the update runs).
+	pg.Start(testhelpers.Phase{RuntimeImage: target, Extensions: prod.With(extName, image)})
+	// Before ALTER: the database is still on the old toolkit version, and its
+	// functions (which reference timescaledb_toolkit-<old>.so) must keep
+	// working: that library is bundled in the new image.
 	require.Equal(t, installed, extVersion(pg))
-	require.Equal(t, "1", pg.Psql("SELECT 1"))
+	verifyFunctions(t, pg)
 
 	pg.Psql("ALTER EXTENSION timescaledb_toolkit UPDATE")
 
