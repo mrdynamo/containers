@@ -12,6 +12,17 @@ variable "VERSION" {
   default = "1.25.0"
 }
 
+# OLD_VERSION = the toolkit version production runs. Its shared library is
+# bundled: installed toolkit functions reference
+# $libdir/timescaledb_toolkit-<installed version>, so without it they error
+# from rollout until ALTER EXTENSION timescaledb_toolkit UPDATE. The
+# sync-production-versions workflow keeps it in sync with home-ops main (PR);
+# merge that PR only after the ALTER.
+# TestUpgradeFromProduction fails if it is not production's.
+variable "OLD_VERSION" {
+  default = "1.25.0"
+}
+
 variable "PG_MAJOR" {
   default = "18"
 }
@@ -36,13 +47,14 @@ target "image" {
   inherits = ["docker-metadata-action"]
   args = {
     VERSION       = "${VERSION}"
+    OLD_VERSION   = "${OLD_VERSION}"
     PG_MAJOR      = "${PG_MAJOR}"
     RUNTIME_IMAGE = "${RUNTIME_IMAGE}"
   }
   labels = {
     "org.opencontainers.image.source" = "${SOURCE}"
-    # Read by the upgrade-rehearsal tests to start the previous release on
-    # the runtime it was built for.
+    # Read by the upgrade-rehearsal tests: an image is rehearsed on the
+    # runtime it was built for (the runtime production will run with it).
     "io.github.mrdynamo.runtime-image" = "${RUNTIME_IMAGE}"
   }
 }

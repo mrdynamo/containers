@@ -48,41 +48,44 @@ func TestFreshInstall(t *testing.T) {
 	verifyData(t, pg)
 }
 
-// TestUpgradeFromReleased rehearses the production rollout:
-//  1. the released image (PREVIOUS_IMAGE, default :rolling) on the runtime it
-//     was built for, with the extension installed and jobs running;
-//  2. CNPG restarts the instance with the new runtime + the image under test
-//     on the same data directory — before ALTER EXTENSION, connections and
-//     jobs must keep working on the old extension version (this is where a
-//     missing versioned loader makes every connection FATAL);
+// TestUpgradeFromProduction rehearses deploying the image under test:
+//  1. production exactly, as deployed from mrdynamo/home-ops main (runtime
+//     image, every extension image, shared_preload_libraries and parameters),
+//     with the extensions installed and jobs running;
+//  2. CNPG restarts the instance with the image under test (and the runtime
+//     it was built for) on the same data directory — before ALTER EXTENSION,
+//     connections and jobs must keep working on the old extension version
+//     (this is where a missing versioned loader makes every connection FATAL);
 //  3. ALTER EXTENSION timescaledb UPDATE as the first command of a new
 //     session (psql -X), exactly as in the runbook;
 //  4. extension at VERSION, all jobs succeed via the scheduler, data intact.
-func TestUpgradeFromReleased(t *testing.T) {
+func TestUpgradeFromProduction(t *testing.T) {
 	ctx := context.Background()
 	version := testhelpers.BakeVariable(t, "VERSION")
 	oldVersion := testhelpers.BakeVariable(t, "OLD_VERSION")
-	runtime := testhelpers.BakeVariable(t, "RUNTIME_IMAGE")
-	previous := testhelpers.PreviousImage("ghcr.io/mrdynamo/timescaledb-bridge:rolling")
 	image := testhelpers.GetTestImage("ghcr.io/mrdynamo/timescaledb-bridge:rolling")
+	prod := testhelpers.Production(t)
+	require.Contains(t, prod.Extensions, extName, "production has no %s extension", extName)
 
-	pg := testhelpers.NewPostgres(t, ctx, testhelpers.BakeVariable(t, "PG_MAJOR"), settings...)
-	previousRuntime := pg.ImageRuntime(previous, runtime)
-	t.Logf("from: %s on %s", previous, previousRuntime)
-	t.Logf("to:   %s on %s", image, runtime)
+	pg := testhelpers.NewPostgres(t, ctx, testhelpers.BakeVariable(t, "PG_MAJOR"), prod.Settings...)
+	target := pg.TargetRuntime(image, testhelpers.BakeVariable(t, "RUNTIME_IMAGE"))
+	t.Logf("from (production): %s", prod)
+	t.Logf("to: %s=%s on %s", extName, image, target)
 
-	// 1. Released state.
-	pg.Start(testhelpers.Phase{RuntimeImage: previousRuntime, Extensions: map[string]string{extName: previous}})
-	pg.Psql("CREATE EXTENSION timescaledb")
+	// 1. Production state.
+	pg.Start(testhelpers.Phase{RuntimeImage: prod.RuntimeImage, Extensions: prod.Extensions})
+	for name := range prod.Extensions {
+		pg.Psql("CREATE EXTENSION " + name)
+	}
 	installed := extVersion(pg)
 	require.Equal(t, oldVersion, installed,
-		"the released image installs %s but OLD_VERSION is %s; OLD_VERSION must be the version running in production", installed, oldVersion)
+		"production runs timescaledb %s but OLD_VERSION is %s; OLD_VERSION must be the version running in production", installed, oldVersion)
 	jobs := createWorkload(t, pg)
 	waitForJobs(t, pg, jobs, dbNow(pg))
 	pauseJobs(t, pg, jobs)
 
-	// 2. Rolling update: new runtime + new extension image, same data.
-	pg.Start(testhelpers.Phase{RuntimeImage: runtime, Extensions: map[string]string{extName: image}})
+	// 2. Rolling update: the image under test on its runtime, same data.
+	pg.Start(testhelpers.Phase{RuntimeImage: target, Extensions: prod.With(extName, image)})
 	require.Equal(t, oldVersion, extVersion(pg), "extension must still be at the old version before ALTER")
 	verifyData(t, pg)
 	since := dbNow(pg)
