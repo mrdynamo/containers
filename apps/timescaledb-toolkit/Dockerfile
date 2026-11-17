@@ -6,7 +6,8 @@
 # production runs (OLD_VERSION): installed toolkit functions reference
 # $libdir/timescaledb_toolkit-<installed version>, so without it every toolkit
 # function errors from rollout until ALTER EXTENSION timescaledb_toolkit UPDATE.
-# Both are built from source the same way (build-toolkit.sh) against the exact
+# Both are built from source the same way (scripts/build-toolkit.sh; only
+# scripts/ is in the build context, see include/.dockerignore) against the exact
 # CNPG runtime. When OLD_VERSION == VERSION the build-old stage is skipped.
 
 ARG RUNTIME_IMAGE
@@ -65,7 +66,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable \
     && rustup component add llvm-tools-preview
 
-COPY --chmod=0755 build-toolkit.sh /usr/local/bin/build-toolkit
+COPY --chmod=0755 scripts/build-toolkit.sh /usr/local/bin/build-toolkit
 
 # ---------------------------------------------------------------------------
 # Stage 1: the new version (VERSION is the upstream tag, e.g. 1.27.0+p2).
