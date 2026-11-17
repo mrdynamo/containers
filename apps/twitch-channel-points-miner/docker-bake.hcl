@@ -6,7 +6,7 @@ variable "APP" {
 
 variable "VERSION" {
   // renovate: datasource=github-releases depName=mpforce1/Twitch-Channel-Points-Miner versioning=loose
-  default = "1.0.0"
+  default = "1.3.0"
 }
 
 variable "SOURCE" {
