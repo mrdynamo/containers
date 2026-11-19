@@ -17,7 +17,7 @@ variable "APP" {
 
 variable "VERSION" {
   // renovate: datasource=github-releases depName=timescale/timescaledb
-  default = "2.29.2"
+  default = "2.32.1"
 }
 
 variable "OLD_VERSION" {
