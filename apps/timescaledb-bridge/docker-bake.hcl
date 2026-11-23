@@ -29,7 +29,7 @@ variable "OLD_VERSION" {
 # version is derived from this image at build time.
 variable "RUNTIME_IMAGE" {
   // renovate: datasource=docker depName=ghcr.io/cloudnative-pg/postgresql
-  default = "ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:771f9eab5225587af259d84680cc69a5b6e374ac32bb24effafde1f3368a1241"
+  default = "ghcr.io/cloudnative-pg/postgresql:18.7-standard-trixie@sha256:1abcfd1cac6d53cda5185706819aab36d66a4ed88e99fc2ae44ab0826aa99f00"
 }
 
 variable "PG_MAJOR" {
