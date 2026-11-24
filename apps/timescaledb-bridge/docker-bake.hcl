@@ -21,7 +21,7 @@ variable "VERSION" {
 }
 
 variable "OLD_VERSION" {
-  default = "2.29.2"
+  default = "2.32.1"
 }
 
 # Build against the exact CNPG runtime image used by the cluster, to avoid
