@@ -20,7 +20,7 @@ variable "VERSION" {
 # merge that PR only after the ALTER.
 # TestUpgradeFromProduction fails if it is not production's.
 variable "OLD_VERSION" {
-  default = "1.25.0"
+  default = "1.28.0"
 }
 
 variable "PG_MAJOR" {
