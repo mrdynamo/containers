@@ -9,7 +9,7 @@ variable "APP" {
 # tagged with the plain X.Y.Z.
 variable "VERSION" {
   // renovate: datasource=github-releases depName=timescale/timescaledb-toolkit
-  default = "1.28.0"
+  default = "1.29.0"
 }
 
 # OLD_VERSION = the toolkit version production runs. Its shared library is
